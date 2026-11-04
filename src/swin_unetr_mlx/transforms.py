@@ -170,9 +170,17 @@ def invert_spacing(
     data: Float32Array,
     affine: Float64Array,
     record: Resampling,
+    *,
+    channel_argmax: bool = False,
 ) -> tuple[Float32Array, Float64Array]:
-    """``SpatialResample.inverse``: resample back to the recorded affine and size."""
-    result, new_affine, _ = spatial_resample(data, affine, record.src_affine, record.orig_size)
+    """``SpatialResample.inverse``: resample back to the recorded affine and size.
+
+    With ``channel_argmax`` the result is ``argmax`` of the resampled float32 values
+    (see ``spatial_resample``).
+    """
+    result, new_affine, _ = spatial_resample(
+        data, affine, record.src_affine, record.orig_size, channel_argmax=channel_argmax
+    )
     return result, new_affine
 
 
@@ -181,8 +189,16 @@ def spatial_resample(
     src_affine: Float64Array,
     dst_affine: Float64Array,
     spatial_size: Sequence[int],
+    *,
+    channel_argmax: bool = False,
 ) -> tuple[Float32Array, Float64Array, Resampling]:
-    """``monai.transforms.spatial.functional.spatial_resample`` (bilinear, border, float64)."""
+    """``monai.transforms.spatial.functional.spatial_resample`` (bilinear, border, float64).
+
+    ``channel_argmax`` returns ``argmax`` of the resampled float32 values instead, as a
+    ``(1, *spatial_size)`` label map. Each output chunk is rounded to float32 and reduced
+    before the next, so the labels equal resampling then ``argmax`` without storing all
+    resampled channels.
+    """
     rank = min(data.ndim - 1, len(src_affine) - 1, 3, len(spatial_size))
     source = to_affine_nd(rank, src_affine)
     target = to_affine_nd(rank, dst_affine)
@@ -195,8 +211,9 @@ def spatial_resample(
         np.allclose(xform, np.eye(len(xform)), atol=AFFINE_TOL) and same_size
     )
     if unchanged:
-        return data.astype(np.float32), np.array(src_affine, dtype=np.float64), record
-    values = _grid_sample(data, xform, in_size, size)
+        values = argmax(data) if channel_argmax else data.astype(np.float32)
+        return values, np.array(src_affine, dtype=np.float64), record
+    values = _grid_sample(data, xform, in_size, size, channel_argmax=channel_argmax)
     affine = np.array(src_affine, dtype=np.float64)
     new_affine = _mm(affine, to_affine_nd(len(affine) - 1, xform))
     return values, new_affine, record
@@ -215,16 +232,20 @@ def scale_intensity_range(
     return np.clip(result, np.float32(b_min), np.float32(b_max)).astype(np.float32, copy=False)
 
 
-def softmax(data: Float32Array) -> Float32Array:
+def softmax(data: Float32Array, *, out: Float32Array | None = None) -> Float32Array:
     """``Activations(softmax=True)`` over channels: ``exp(x - max) / sum`` in float32.
 
     Torch's vectorized exponential can differ from NumPy's by a float32 rounding unit.
+    The steps run in one float32 buffer, ``out`` when given (it may be ``data``), so
+    the only full-size allocation is that buffer.
     """
-    shifted = np.exp(data - data.max(axis=0, keepdims=True))
+    peak = data.max(axis=0, keepdims=True)
+    shifted = np.subtract(data, peak, out=out, dtype=np.float32)
+    np.exp(shifted, out=shifted)
     total = shifted[0].copy()
     for channel in shifted[1:]:
         total += channel
-    return (shifted / total).astype(np.float32, copy=False)
+    return np.divide(shifted, total, out=shifted)
 
 
 def argmax(data: Float32Array) -> Float32Array:
@@ -288,8 +309,13 @@ def _grid_sample(
     xform: Float64Array,
     in_size: Sequence[int],
     out_size: Sequence[int],
+    *,
+    channel_argmax: bool = False,
 ) -> Float32Array:
     """``affine_grid`` then trilinear ``grid_sample`` (border, ``align_corners=False``).
+
+    With ``channel_argmax`` each float32-rounded output chunk is reduced by ``argmax``
+    into a ``(1, ...)`` label map, so all channels are never stored at once.
 
     MONAI samples a float64 copy of the image and rounds the result to float32; here
     each output chunk is computed in float64 from the gathered float32 voxels, which
@@ -312,7 +338,8 @@ def _grid_sample(
     separable = all(
         theta[row, column] == 0 for row in range(3) for column in range(3) if row != column
     )
-    result = np.empty((data.shape[0], depth, height, width), dtype=np.float32)
+    channels = 1 if channel_argmax else data.shape[0]
+    result = np.empty((channels, depth, height, width), dtype=np.float32)
     step = max(1, _CHUNK_VOXELS // max(1, height * width * data.shape[0]))
 
     def fill(start: int) -> None:
@@ -322,12 +349,15 @@ def _grid_sample(
             gx = zx[0][0] + ys[0][0]
             gy = zx[1][0, 0] + ys[1]
             gz = zx[2][start:stop, 0] + ys[2][0]
-            result[:, start:stop] = _sample_separable(data, gx, gy, gz)
+            values = _sample_separable(data, gx, gy, gz)
         else:
             coordinates = [
                 zx[row][start:stop, None, :] + ys[row][None, :, None] for row in range(3)
             ]
-            result[:, start:stop] = _sample(data, *coordinates)
+            values = _sample(data, *coordinates)
+        # Round to float32 first, as storing the full resampled volume would.
+        rounded = values.astype(np.float32)
+        result[:, start:stop] = argmax(rounded) if channel_argmax else rounded
 
     # Chunks write disjoint output planes and NumPy releases the GIL in their
     # gathers and arithmetic, so threads change only the elapsed time.

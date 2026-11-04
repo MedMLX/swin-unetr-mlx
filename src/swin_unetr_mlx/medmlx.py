@@ -113,7 +113,12 @@ def run(
     prepared = time.perf_counter()
     logits, runtime = _predict(network, image)
     predicted = time.perf_counter()
-    mask = postprocess(logits[0], inverse)
+    # Softmax into the logits buffer and drop the logits, as ``postprocess`` would
+    # otherwise keep both full-size arrays alive during resampling.
+    probabilities = transforms.softmax(logits[0], out=logits[0])
+    del logits
+    mask = _restore(probabilities, inverse)
+    del probabilities
     _validate_mask(mask, shape)
     mask_path.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(mask_path, mask, reader_affine)
@@ -176,10 +181,24 @@ def postprocess(
     softmax probabilities are resampled back to the source grid (bilinear) before the
     argmax. Returns the label map on the source grid.
     """
+    return _restore(transforms.softmax(logits), inverse)
+
+
+def _restore(
+    probabilities: Float32Array,
+    inverse: tuple[transforms.Orientation, transforms.Resampling, Float64Array],
+) -> Float32Array:
+    """Resample, argmax, then reorient: ``postprocess`` after its softmax.
+
+    Argmax runs per resampling chunk, and reorientation, a spatial flip/transpose
+    that leaves the channel axis alone, then moves one label channel instead of 14.
+    """
     orientation, resampling, affine = inverse
-    values, restored = transforms.invert_spacing(transforms.softmax(logits), affine, resampling)
-    values, _ = transforms.invert_orientation(values, restored, orientation)
-    return transforms.argmax(values)[0]
+    labels, restored = transforms.invert_spacing(
+        probabilities, affine, resampling, channel_argmax=True
+    )
+    labels, _ = transforms.invert_orientation(labels, restored, orientation)
+    return labels[0]
 
 
 def _weights_file(weights_path: str) -> Path:
