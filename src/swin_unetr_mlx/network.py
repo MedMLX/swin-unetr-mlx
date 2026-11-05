@@ -19,6 +19,9 @@ from swin_unetr_mlx.runtime import require_metal
 
 type MergingProfile = Literal["monai-1.4", "monai-1.6"]
 
+# Output depth planes per same-padded 3D convolution slab (see ``SwinUNETR.conv``).
+_DEPTH_SLAB = 12
+
 
 class SwinUNETR(ChannelLastGraph):
     """FP32 SwinUNETR forward pass for one 96^3 CT window.
@@ -39,11 +42,6 @@ class SwinUNETR(ChannelLastGraph):
     # Static declarations retain the original runtime implementations.
     if TYPE_CHECKING:
 
-        def conv(
-            self, x: Array, name: str, *, padding: int = 0, stride: int = 1, groups: int = 1
-        ) -> Array:
-            """Apply the inherited convolution using a named checkpoint prefix."""
-            ...
         def linear(self, x: Array, name: str) -> Array:
             """Apply the inherited linear layer using named weights."""
             ...
@@ -76,6 +74,36 @@ class SwinUNETR(ChannelLastGraph):
         self._attention_masks: dict[
             tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]], Array
         ] = {}
+
+    def conv(
+        self, x: Array, name: str, *, padding: int = 0, stride: int = 1, groups: int = 1
+    ) -> Array:
+        """Apply a named convolution, splitting deep same-padded 3D convolutions into depth slabs.
+
+        MLX 0.32 runs a 3x3x3 convolution with nonzero depth padding on a much slower Metal
+        path than one with zero depth padding. Each slab of ``_DEPTH_SLAB`` output planes
+        convolves its input planes plus a one-plane halo (zeros at the volume boundary) with
+        depth padding 0, roughly doubling throughput for the 96^3 decoder blocks. The slab
+        size keeps that path's scratch memory below the encoder's attention peak. Logits
+        stay within the seeded PyTorch qualification bound but are not bitwise identical
+        to the unsplit convolution, whose reduction order differs.
+        """
+        mx = self.mx
+        weight = self.w[f"{name}.weight"]
+        depth = x.shape[1]
+        if weight.ndim != 5 or padding != 1 or stride != 1 or groups != 1 or depth <= _DEPTH_SLAB:
+            return super().conv(x, name, padding=padding, stride=stride, groups=groups)
+        weight = mx.transpose(weight, (0, 2, 3, 4, 1))
+        y = mx.zeros((*x.shape[:4], weight.shape[0]), dtype=x.dtype)
+        for start in range(0, depth, _DEPTH_SLAB):
+            stop = min(start + _DEPTH_SLAB, depth)
+            part = x[:, max(start - 1, 0) : min(stop + 1, depth)]
+            halo = (int(start == 0), int(stop == depth))
+            if any(halo):
+                part = mx.pad(part, [(0, 0), halo, (0, 0), (0, 0), (0, 0)])
+            y[:, start:stop] = mx.conv3d(part, weight, padding=(0, 1, 1))
+        bias = self.w.get(f"{name}.bias")
+        return y if bias is None else y + bias
 
     @staticmethod
     def partition(x: Array, window: tuple[int, ...]) -> Array:
