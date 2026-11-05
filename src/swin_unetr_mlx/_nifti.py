@@ -27,40 +27,21 @@ class NiftiHeader(Protocol):
     def get_zooms(self) -> tuple[float, ...]:
         """Return voxel spacing stored in the NIfTI header."""
         ...
-    def set_zooms(self, zooms: Sequence[float] | Float64Array) -> None:
-        """Set voxel spacing in the NIfTI header."""
-        ...
-    def get_xyzt_units(self) -> tuple[str, str]:
-        """Return the NIfTI spatial and temporal unit names."""
-        ...
     def set_xyzt_units(self, xyz: str) -> None:
         """Set the NIfTI spatial unit name."""
         ...
     def __getitem__(self, key: str) -> HostArray:
         """Read a named NIfTI header field."""
         ...
-    def __setitem__(self, key: str, value: int) -> None:
-        """Set an integer-valued NIfTI header field."""
-        ...
 
 
 class NiftiImage(Protocol):
-    shape: tuple[int, ...]
     affine: Float64Array
     dataobj: ArrayBuffer | HostArray
     header: NiftiHeader
 
     def __init__(self, dataobj: HostArray, affine: HostArray) -> None:
         """Construct an image from voxel data and an affine."""
-        ...
-    def get_data_dtype(self) -> np.dtype[np.generic]:
-        """Return the stored image data dtype."""
-        ...
-    def get_sform(self) -> Float64Array:
-        """Return the NIfTI sform affine."""
-        ...
-    def get_qform(self) -> Float64Array:
-        """Return the NIfTI qform affine."""
         ...
     def set_sform(self, affine: Float64Array, code: int | None = None) -> None:
         """Set the sform affine and optional code."""

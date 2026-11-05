@@ -38,25 +38,6 @@ class SwinUNETR(ChannelLastGraph):
 
     mx: MLX
     w: Mapping[str, Array]
-    # These methods are inherited from medmlx-core's ChannelLastGraph.
-    # Static declarations retain the original runtime implementations.
-    if TYPE_CHECKING:
-
-        def linear(self, x: Array, name: str) -> Array:
-            """Apply the inherited linear layer using named weights."""
-            ...
-        def layer_norm(self, x: Array, name: str | None = None) -> Array:
-            """Apply inherited layer normalization using optional named weights."""
-            ...
-        def residual3d(self, x: Array, name: str) -> Array:
-            """Apply an inherited three-dimensional residual block."""
-            ...
-        def deconv3d(self, x: Array, name: str) -> Array:
-            """Apply an inherited three-dimensional transposed convolution."""
-            ...
-        def require_input(self, x: Array, shape: tuple[int, ...]) -> None:
-            """Validate native input dtype and expected spatial dimensions."""
-            ...
 
     def __init__(
         self,

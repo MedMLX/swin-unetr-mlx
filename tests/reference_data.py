@@ -37,7 +37,7 @@ def recording(name: str) -> ReferenceRecording:
     """Load a named reference archive and validate its recorded metadata."""
     path = ROOT / f"{name}.npz"
     if not path.is_file():
-        raise FileNotFoundError(f"Missing upstream recording: {path}; run make_medmlx_fixtures.py")
+        raise FileNotFoundError(f"Missing upstream recording: {path}")
     with np.load(path, allow_pickle=False) as data:
         return ReferenceRecording(
             {key: data[key] for key in data.files if key != "metadata"},
@@ -54,6 +54,6 @@ def seeded_native_weights(seed: int) -> dict[str, NumericArray]:
         # Draw in source order so the native tensors match the recorded seeded state.
         if name.endswith("relative_position_index"):
             state[name] = rng.integers(0, 13**3, shape).astype(np.int32)
-        elif not name.endswith("num_batches_tracked"):
+        else:
             state[name] = rng.normal(0.0, 0.02, shape).astype(np.float32)
     return state

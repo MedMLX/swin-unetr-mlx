@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
-
 import numpy as np
-
-if TYPE_CHECKING:
-    from swin_unetr_mlx._types import Array
 
 type HostArray = np.ndarray[tuple[int, ...], np.dtype[np.generic]]
 type Float32Array = np.ndarray[tuple[int, ...], np.dtype[np.float32]]
 type Float64Array = np.ndarray[tuple[int, ...], np.dtype[np.float64]]
 type Int64Array = np.ndarray[tuple[int, ...], np.dtype[np.int64]]
-type MaskArray = Float32Array | Int64Array
 
 type NumericScalar = (
     np.bool_
@@ -33,7 +26,6 @@ type NumericScalar = (
     | np.complex128
 )
 type NumericArray = np.ndarray[tuple[int, ...], np.dtype[NumericScalar]]
-as_numpy = cast("Callable[[Array], NumericArray]", np.array)
 
 type Int32Array = np.ndarray[tuple[int, ...], np.dtype[np.int32]]
 type UInt8Array = np.ndarray[tuple[int, ...], np.dtype[np.uint8]]

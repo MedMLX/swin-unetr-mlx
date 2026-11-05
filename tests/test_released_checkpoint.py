@@ -16,7 +16,6 @@ from medmlx_core.typing import ArrayFactory
 from reference_data import seeded_native_weights
 
 from swin_unetr_mlx import forward_patch, load_model
-from swin_unetr_mlx._arrays import Float32Array
 
 
 def test_converted_model_matches_independent_source(
@@ -32,15 +31,11 @@ def test_converted_model_matches_independent_source(
     network = load_model(Path(checkpoint))
     values = np.load(input_path, allow_pickle=False)
     assert values.shape == (1, 1, 96, 96, 96)
-    result = forward_patch(network, values)
-    outputs = (
-        cast(dict[str, Float32Array], result) if isinstance(result, dict) else {"logits": result}
-    )
-    for name, actual in outputs.items():
-        expected = np.load(Path(reference) / f"{name}.npy", allow_pickle=False)
-        assert actual.dtype == np.float32 and np.isfinite(actual).all()
-        np.testing.assert_allclose(actual, expected, atol=1e-4, rtol=1e-4)
-        np.testing.assert_array_equal(actual.argmax(axis=1), expected.argmax(axis=1))
+    actual = forward_patch(network, values)
+    expected = np.load(Path(reference) / "logits.npy", allow_pickle=False)
+    assert actual.dtype == np.float32 and np.isfinite(actual).all()
+    np.testing.assert_allclose(actual, expected, atol=1e-4, rtol=1e-4)
+    np.testing.assert_array_equal(actual.argmax(axis=1), expected.argmax(axis=1))
 
 
 @pytest.fixture(scope="module")

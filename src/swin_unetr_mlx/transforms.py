@@ -23,35 +23,17 @@ from typing import cast
 import numpy as np
 import numpy.typing as npt
 from medmlx_core.geometry import (
-    _bmm as _bmm,
-)
-from medmlx_core.geometry import (
-    _fma as _fma,
-)
-from medmlx_core.geometry import (
-    _linspace_from_neg_one as _linspace_from_neg_one,
-)
-from medmlx_core.geometry import (
-    _mm as _mm,
-)
-from medmlx_core.geometry import (
-    affine_to_spacing as affine_to_spacing,
-)
-from medmlx_core.geometry import (
-    compute_shape_offset as compute_shape_offset,
-)
-from medmlx_core.geometry import (
-    to_affine_nd as to_affine_nd,
-)
-from medmlx_core.geometry import (
-    zoom_affine as zoom_affine,
+    _bmm,
+    _linspace_from_neg_one,
+    _mm,
+    affine_to_spacing,
+    compute_shape_offset,
+    to_affine_nd,
+    zoom_affine,
 )
 
-from swin_unetr_mlx._arrays import HostArray, Int64Array
+from swin_unetr_mlx._arrays import Float32Array, Float64Array, HostArray, Int64Array
 from swin_unetr_mlx._nifti import nib
-
-type Float32Array = npt.NDArray[np.float32]
-type Float64Array = npt.NDArray[np.float64]
 
 # monai.data.utils.AFFINE_TOL
 AFFINE_TOL = 1e-3
@@ -96,14 +78,6 @@ def read_itk(path: Path) -> tuple[Float32Array, Float64Array]:
     return data, np.diag([-1, -1, 1, 1]).astype(affine.dtype) @ affine
 
 
-
-
-
-
-
-
-
-
 def orient(
     data: Float32Array,
     affine: Float64Array,
@@ -146,7 +120,6 @@ def spacing(
     data: Float32Array,
     affine: Float64Array,
     pixdim: Sequence[float],
-    output_spatial_shape: Sequence[int] | None = None,
 ) -> tuple[Float32Array, Float64Array, Resampling]:
     """``Spacing(pixdim, mode="bilinear")`` with MONAI defaults (border, float64)."""
     rank = data.ndim - 1
@@ -162,8 +135,7 @@ def spacing(
     new_affine = zoom_affine(affine_, out_d)
     output_shape, offset = compute_shape_offset(data.shape[1:], affine_, new_affine)
     new_affine[:rank, -1] = offset[:rank]
-    shape = list(output_shape) if output_spatial_shape is None else list(output_spatial_shape)
-    return spatial_resample(data, affine, new_affine, shape)
+    return spatial_resample(data, affine, new_affine, list(output_shape))
 
 
 def invert_spacing(
@@ -268,10 +240,6 @@ def write_nifti(path: Path, data: HostArray, affine: Float64Array, dtype: npt.DT
     nib.save(image, str(path))
 
 
-
-
-
-
 def _normalize_transform(shape: Sequence[int]) -> Float64Array:
     """``monai.networks.utils.normalize_transform`` (``align_corners=False``)."""
     size = np.asarray(shape, dtype=np.float64)
@@ -281,10 +249,6 @@ def _normalize_transform(shape: Sequence[int]) -> Float64Array:
     result = np.diag(np.concatenate((norm, np.ones(1, dtype=np.float64))))
     result[:-1, -1] = 1.0 / size - 1.0
     return result
-
-
-
-
 
 
 def _theta(

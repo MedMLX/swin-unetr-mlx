@@ -58,15 +58,12 @@ swin-unetr = "swin_unetr_mlx.medmlx:MODEL"
 
 [project.optional-dependencies]
 dev = [
-  "pyright==1.1.414","pytest>=8.4,<10", "ruff>=0.13,<1", "torch>=2.13,<2.14", "hypothesis>=6.140,<7"]
+  "pyright==1.1.414","pytest>=8.4,<10", "ruff>=0.13,<1", "torch>=2.13,<2.14"]
 
 [tool.uv]
 constraint-dependencies = ["setuptools>=84.1.0", "filelock>=4.2.1", ]
 environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 required-environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/swin_unetr_mlx"]
@@ -84,8 +81,8 @@ extend-select = ["TID251", "TID252", "ANN401"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["scripts","src","tests"]
-extraPaths = ["src", "scripts", "tests"]
+include = ["src","tests"]
+extraPaths = ["src", "tests"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 enableTypeIgnoreComments = false

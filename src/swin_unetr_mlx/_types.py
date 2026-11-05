@@ -11,17 +11,9 @@ if TYPE_CHECKING:
     import mlx.core as mx
     from medmlx_core.typing import MlxRuntime
 
-    from swin_unetr_mlx._arrays import Float32Array, HostArray
+    from swin_unetr_mlx._arrays import Float32Array
 
     type Array = mx.array
-    type ArrayValue = bool | int | float | complex | list[ArrayValue] | tuple[ArrayValue, ...]
-
-    class ArrayConstructor(Protocol):
-        def __call__(
-            self, value: HostArray | Array | ArrayValue, dtype: mx.Dtype | None = None
-        ) -> Array:
-            """Create a native array from host or array values."""
-            ...
 
     type ArrayTree = Array | Sequence[ArrayTree] | Mapping[str, ArrayTree]
 
@@ -77,7 +69,3 @@ if TYPE_CHECKING:
     class CoreSlidingWindow(Protocol):
         sliding_window_inference: SlidingWindowInference
 
-    class Metal(Protocol):
-        def is_available(self) -> bool:
-            """Return whether the Metal runtime is available."""
-            ...
