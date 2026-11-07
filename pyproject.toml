@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "swin-unetr-mlx"
-version = "0.2.6"
+version = "0.2.7"
 description = "Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -38,7 +38,7 @@ keywords = [
   "abdomen",
 ]
 dependencies = [
-  "medmlx-core==0.2.6",
+  "medmlx-core>=0.2.6,<0.3",
   "mlx==0.32.4; platform_system == 'Darwin' and platform_machine == 'arm64'",
   "nibabel>=5.3,<6",
   "numpy>=2.0,<3",
@@ -47,7 +47,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://medmlx.org"
-Documentation = "https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.6/README.md"
+Documentation = "https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/README.md"
 Repository = "https://github.com/MedMLX/swin-unetr-mlx"
 Issues = "https://github.com/MedMLX/swin-unetr-mlx/issues"
 Weights = "https://huggingface.co/MedMLX/swin-unetr-mlx"

@@ -6,14 +6,14 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 
 [![PyPI](https://img.shields.io/pypi/v/swin-unetr-mlx)](https://pypi.org/project/swin-unetr-mlx/)
 [![Python](https://img.shields.io/pypi/pyversions/swin-unetr-mlx)](https://pypi.org/project/swin-unetr-mlx/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.6/LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/LICENSE)
 [![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-MLX-black?logo=apple)](https://github.com/ml-explore/mlx)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97_Hugging_Face-weights-yellow)](https://huggingface.co/MedMLX/swin-unetr-mlx)
 [![MedMLX](https://img.shields.io/badge/MedMLX-runtime-A51C30)](https://github.com/MedMLX/medmlx)
 
 [Model weights](https://huggingface.co/MedMLX/swin-unetr-mlx) · [MedMLX](https://github.com/MedMLX/medmlx)
 
-<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/v0.2.6/docs/showcase.png" alt="Abdominal CT and its native multi-organ segmentation" width="100%">
+<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/v0.2.7/docs/showcase.png" alt="Abdominal CT and its native multi-organ segmentation" width="100%">
 
 </div>
 
@@ -43,7 +43,7 @@ For Codex, use `codex mcp add medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-wor
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate
-uv pip install "swin-unetr-mlx>=0.2.6"
+uv pip install "swin-unetr-mlx>=0.2.7"
 ```
 
 ## Run
@@ -100,7 +100,7 @@ identity. Inference needs Apple Silicon with Metal and has no CPU fallback.
 Following the bundle's `SaveImaged` layout, `ct.nii.gz` produces
 `out/ct/ct_trans.nii.gz`, with the input shape and the ITK reader's affine. It holds
 float32 label indices from the bundled
-[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.6/src/swin_unetr_mlx/specification.json):
+[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/src/swin_unetr_mlx/specification.json):
 
 | Index | Name |
 | ---: | --- |
@@ -127,6 +127,6 @@ host or unavailable Metal raises `MissingDependencyError`.
 
 ## License
 
-[Apache-2.0](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.6/LICENSE). See [third-party notices](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.6/THIRD_PARTY_NOTICES.md). Model weights retain their publisher terms.
+[Apache-2.0](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/LICENSE). See [third-party notices](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/THIRD_PARTY_NOTICES.md). Model weights retain their publisher terms.
 
 For research and education. Outputs require human review.

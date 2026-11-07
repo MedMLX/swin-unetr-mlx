@@ -16,7 +16,7 @@ _EXPORTS = {
     "load_model": "swin_unetr_mlx.weights",
 }
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 __all__ = [
     "SwinUNETR",
     "forward_patch",
