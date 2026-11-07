@@ -21,6 +21,8 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 | :--- | :--- |
 | 3D abdominal CT · NIfTI | Organ mask on the input grid |
 
+Weights: 253 MB download. Peak MLX memory: 7.4 GB for a 768×768×101 abdominal CT.
+
 ## Use with MedMLX
 
 The [MedMLX MCP server](https://github.com/MedMLX/medmlx/blob/main/docs/mcp.md) is the lowest-friction way to use this model. It installs this runtime, downloads its weights on first use, and lets an AI agent describe, check and run `swin-unetr` for you.

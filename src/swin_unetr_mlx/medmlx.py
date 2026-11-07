@@ -36,6 +36,8 @@ MODEL = {
     "label": "SwinUNETR BTCV",
     "task": "segmentation",
     "run": "swin_unetr_mlx.medmlx:run",
+    # Measured MLX peak for a 768x768x101 abdominal CT; larger inputs need more.
+    "peak_memory_gb": 7.5,
     "summary": ("MONAI swin_unetr_btcv_segmentation: 13 abdominal organs in contrast-enhanced CT."),
     "labels": {str(value): name for value, name in LABELS.items()},
 }
