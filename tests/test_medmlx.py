@@ -108,3 +108,69 @@ def test_run_rejects_invalid_arguments_before_download(
             image_path=str(image), weights_path=weights, output_dir=str(output),
             overwrite=overwrite,
         )
+
+
+def _affine(spacing: tuple[float, float, float], origin: tuple[float, float, float]) -> np.ndarray:
+    """A non-identity direction (rotations about z then x) with the given spacing and origin."""
+    c, s, cx, sx = np.cos(0.3), np.sin(0.3), np.cos(0.2), np.sin(0.2)
+    rotation = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ np.array(
+        [[1, 0, 0], [0, cx, -sx], [0, sx, cx]]
+    )
+    affine = np.eye(4)
+    affine[:3, :3] = rotation @ np.diag(spacing)
+    affine[:3, 3] = origin
+    return affine
+
+
+ORIENTED = _affine((0.8, 0.9, 2.5), (-120.5, 80.25, 300.0))
+AXIAL = np.diag([-0.8, 0.9, 2.5, 1.0])
+METRES = ORIENTED * np.r_[1e-3, 1e-3, 1e-3, 1.0][:, None]
+
+# (sform, sform_code, qform, qform_code, units, millimetres per unit, accepted)
+GEOMETRIES = {
+    "matching_forms": (ORIENTED, 1, ORIENTED, 1, "mm", 1.0, True),
+    "qform_only": (ORIENTED, 0, ORIENTED, 1, "mm", 1.0, True),
+    "metres": (METRES, 1, METRES, 1, "meter", 1000.0, True),
+    # ITK takes the qform over an aligned (code 2) sform; NiBabel takes the sform.
+    "conflicting_aligned_sform": (ORIENTED, 2, AXIAL, 1, "mm", 1.0, False),
+    # ITK replaces a sheared sform with the qform.
+    "sheared_sform": (ORIENTED + np.eye(4, k=1) * [0.3], 1, ORIENTED, 1, "mm", 1.0, False),
+    # Without form codes the readers place the origin differently.
+    "no_form_codes": (ORIENTED, 0, ORIENTED, 0, "mm", 1.0, False),
+}
+
+
+@pytest.mark.parametrize("case", GEOMETRIES)
+def test_run_requires_reader_geometry_agreement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """Reject NIfTI forms that ITK and NiBabel map to different physical coordinates.
+
+    Accepted files then fail only on the placeholder weights, and the ITK affine the
+    runner writes equals NiBabel's affine in millimetres.
+    """
+    sform, sform_code, qform, qform_code, units, millimetres, accepted = GEOMETRIES[case]
+    data = np.asanyarray(nib.load(_image(tmp_path, "axis")).dataobj)
+    image = nib.Nifti1Image(data, sform)
+    image.header.set_xyzt_units(units)
+    image.set_sform(sform, sform_code)
+    image.set_qform(qform, qform_code)
+    path = tmp_path / f"{case}.nii.gz"
+    nib.save(image, path)
+    weights = tmp_path / "model" / "swinunetr.safetensors"
+    weights.parent.mkdir()
+    weights.write_bytes(b"placeholder")
+    monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
+    error = AssetNotReadyError if accepted else InvalidInputError
+    with pytest.raises(error) as raised:
+        run(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
+    if not accepted:
+        assert "conflicting NIfTI geometry" in str(raised.value)
+        return
+    reference = nib.load(path).affine * np.r_[[millimetres] * 3, 1.0][:, None]
+    np.testing.assert_allclose(transforms.read_itk(path)[1], reference, rtol=1e-6, atol=1e-3)
+
+
+def _reject_weights(weights: Path) -> None:
+    """Stand in for the weights load reached only after the geometry check passes."""
+    raise AssetNotReadyError("placeholder weights", reason="placeholder", hint="")

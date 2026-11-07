@@ -60,8 +60,8 @@ def run(
     Writes ``<input>/<input>_trans.nii.gz`` under ``output_dir``, with the input
     shape and ITK reader's affine, and float32 labels 0-13 as ``SaveImaged`` does. An
     existing mask is replaced only when ``overwrite`` is true (default false).
-    NIfTI spatial units and forms are interpreted by ITK; the preliminary NiBabel check does
-    not compare its affine with the ITK affine.
+    The image is rejected unless NiBabel's affine, converted to millimetres, matches
+    the ITK affine, so conflicting qform/sform geometry never selects a reader's choice.
 
     Args:
         image_path: Finite 3D CT NIfTI in Hounsfield units, readable by NiBabel and ITK.
@@ -77,7 +77,7 @@ def run(
     Raises:
         InvalidInputError: ``overwrite`` is not a bool, the output exists without
             ``overwrite``, or the image is missing, not a finite 3D NIfTI with positive
-            spacing, or reads with different shapes through ITK and nibabel.
+            spacing, or reads with different shapes or affines through ITK and nibabel.
         AssetNotReadyError: The weights file is missing, not ``.safetensors``, or does
             not match the pinned graph.
         ModelExecutionError: Inference failed or the mask is off the source grid or has
@@ -100,7 +100,7 @@ def run(
     checkpoint = bundle_dir / "swinunetr.safetensors" if bundle_dir.is_dir() else bundle_dir
     weights = _weights_file(str(checkpoint))
     started = time.perf_counter()
-    shape = _validate_volume(image_file, "image_path")
+    shape, nibabel_affine = _validate_volume(image_file, "image_path")
     try:
         data, reader_affine = transforms.read_itk(image_file)
     except RuntimeError as error:
@@ -109,6 +109,7 @@ def run(
         raise InvalidInputError(
             f"image_path reads as {data.shape} through ITK but {shape} through nibabel"
         )
+    _validate_geometry(reader_affine, nibabel_affine, "image_path")
     network = _load_network(weights)
     loaded = time.perf_counter()
     image, inverse = preprocess(data, reader_affine)
@@ -224,11 +225,11 @@ def _weights_file(weights_path: str) -> Path:
     return path
 
 
-def _validate_volume(path: Path, role: str) -> tuple[int, int, int]:
+def _validate_volume(path: Path, role: str) -> tuple[tuple[int, int, int], Float64Array]:
     """Admit a real, finite float32-range 3D NIfTI with valid spatial units.
 
-    ITK converts metres and microns to millimetres and interprets spatial forms;
-    unspecified spatial units are treated as millimetres.
+    Returns the shape and NiBabel's RAS affine converted to millimetres, the unit
+    ITK reports: metres and microns are scaled and unspecified units count as mm.
     """
     from swin_unetr_mlx._nifti import ImageFileError, nib
 
@@ -258,7 +259,27 @@ def _validate_volume(path: Path, role: str) -> tuple[int, int, int]:
     zooms = np.asarray(image.header.get_zooms()[:3], dtype=np.float64)
     if not np.all(np.isfinite(zooms)) or np.any(zooms <= 0.0):
         raise InvalidInputError(f"{role} voxel spacing values must be finite and positive")
-    return (int(raw.shape[0]), int(raw.shape[1]), int(raw.shape[2]))
+    # NIfTI unit codes 1-3 are metre, millimetre, micron; 0 (unknown) reads as mm.
+    millimetres = {0: 1.0, 1: 1000.0, 2: 1.0, 3: 0.001}[int(image.header["xyzt_units"]) & 0x07]
+    affine = affine * np.array([[millimetres], [millimetres], [millimetres], [1.0]])
+    return (int(raw.shape[0]), int(raw.shape[1]), int(raw.shape[2])), affine
+
+
+def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, role: str) -> None:
+    """Reject a NIfTI whose physical geometry differs between ITK and NiBabel.
+
+    The readers resolve qform and sform differently: NiBabel prefers any sform,
+    ITK prefers a qform over a non-scanner sform or a sheared one, and with neither
+    form code they assume different origins. Agreement within 1e-3 mm (the stored
+    forms are float32) means the voxel-to-RAS mapping used for preprocessing and the
+    written mask is the one both readers report.
+    """
+    if not np.allclose(itk_affine, nibabel_affine, rtol=1e-6, atol=1e-3):
+        raise InvalidInputError(
+            f"{role} has conflicting NIfTI geometry: ITK affine "
+            f"{np.round(itk_affine, 4).tolist()} differs from NiBabel affine "
+            f"{np.round(nibabel_affine, 4).tolist()}; set a qform or sform code with matching matrices"
+        )
 
 
 def _load_network(weights: Path) -> SwinUNETR:
