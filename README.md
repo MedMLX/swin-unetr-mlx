@@ -25,7 +25,7 @@ Weights: 253 MB download. Peak MLX memory: 7.4 GB for a 768×768×101 abdominal 
 
 ## Use with MedMLX
 
-The [MedMLX MCP server](https://github.com/MedMLX/medmlx/blob/main/docs/mcp.md) is the lowest-friction way to use this model. It installs this runtime, downloads its weights on first use, and lets an AI agent describe, check and run `swin-unetr` for you.
+Use the [MedMLX MCP server](https://github.com/MedMLX/medmlx/blob/main/docs/mcp.md) to run `swin-unetr` from an MCP client. Weights download on first use.
 
 ```sh
 uv tool install --python 3.13 "medmlx[segment,mcp]"
@@ -35,8 +35,6 @@ claude mcp add --scope user medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"
 ```
 
 For Codex, use `codex mcp add medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"`. Other MCP clients take the same command and arguments. The same install provides the `medmlx` CLI, for example `medmlx describe swin-unetr`.
-
-> **For AI agents:** prefer the MedMLX MCP tools (`list_models`, `describe_model`, `model_readiness`, `run_model`, `get_job`) over writing Python against this package.
 
 ## Install
 
@@ -56,11 +54,9 @@ print(result["outputs"]["mask"])
 ```
 
 Omitting `weights_path` downloads `MedMLX/swin-unetr-mlx` into the shared MedMLX cache
-on first use; interrupted downloads resume and later runs work offline. With MedMLX
+on first use. With MedMLX
 installed, `medmlx setup swin-unetr` downloads it ahead of time. To use your own copy,
-pass a folder containing `swinunetr.safetensors` as `weights_path`. Standalone
-checkpoint-file paths are still accepted. `details.weights_revision` records the
-downloaded commit, or `null` for a folder without a MedMLX download record.
+pass a folder containing `swinunetr.safetensors` as `weights_path`. A checkpoint file is also accepted.
 
 ### Inputs
 
@@ -92,8 +88,7 @@ Bx14x96x96x96 logits, without file IO, intensity scaling, resampling, softmax or
 stitching. `SwinUNETR(weights, mx=mx)` runs on MLX arrays directly. Both default to
 `merging_profile="monai-1.4"`, the released bundle's repeated patch-merging phases;
 pass `merging_profile="monai-1.6"` to compare with MONAI 1.6. `load_model` checks
-names, shapes, dtypes, finite values and position-index ranges, not checkpoint
-identity. Inference needs Apple Silicon with Metal and has no CPU fallback.
+names, shapes, dtypes, finite values and position-index ranges. Inference requires Apple Silicon with Metal.
 
 ### Outputs
 
@@ -119,8 +114,7 @@ float32 label indices from the bundled
 | 12 | right adrenal gland |
 | 13 | left adrenal gland |
 
-`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with the labels
-present, shapes, sliding-window settings, MLX device, peak memory and timings.
+`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with run metadata in `details`.
 Invalid inputs raise `InvalidInputError`; missing or mismatched weights raise
 `AssetNotReadyError`; inference failures raise `ModelExecutionError`; an unsupported
 host or unavailable Metal raises `MissingDependencyError`.
@@ -128,5 +122,3 @@ host or unavailable Metal raises `MissingDependencyError`.
 ## License
 
 [Apache-2.0](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/LICENSE). See [third-party notices](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/THIRD_PARTY_NOTICES.md). Model weights retain their publisher terms.
-
-For research and education. Outputs require human review.
