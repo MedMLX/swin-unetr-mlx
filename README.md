@@ -13,7 +13,7 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 
 [Model weights](https://huggingface.co/MedMLX/swin-unetr-mlx) · [MedMLX](https://github.com/MedMLX/medmlx)
 
-<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/v0.2.7/docs/showcase.png" alt="Abdominal CT and its native multi-organ segmentation" width="100%">
+<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/main/docs/showcase.png" alt="Abdominal CT and its native multi-organ segmentation" width="100%">
 
 </div>
 
