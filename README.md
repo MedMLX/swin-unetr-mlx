@@ -21,7 +21,9 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 | :--- | :--- |
 | 3D abdominal CT · NIfTI | Organ mask on the input grid |
 
-Weights: 253 MB download. Peak MLX memory: 7.4 GB for a 768×768×101 abdominal CT.
+| Model | Weights download | Peak MLX memory | Measured on |
+| :--- | ---: | ---: | :--- |
+| `swin-unetr` | 253 MB | 7.4 GB | 768×768×101 abdominal CT |
 
 ## Use with MedMLX
 
@@ -56,9 +58,9 @@ print(result["outputs"]["mask"])
 ```
 
 Omitting `weights_path` downloads `MedMLX/swin-unetr-mlx` into the shared MedMLX cache
-on first use. With MedMLX
-installed, `medmlx setup swin-unetr` downloads it ahead of time. To use your own copy,
-pass a folder containing `swinunetr.safetensors` as `weights_path`. A checkpoint file is also accepted.
+on first use; with MedMLX installed, `medmlx setup swin-unetr` downloads it ahead of
+time. To use your own copy, pass a folder containing `swinunetr.safetensors`, or a
+checkpoint file, as `weights_path`.
 
 ### Inputs
 
@@ -73,6 +75,33 @@ Voxels must be finite and representable in float32. ITK reads the image: it conv
 metres and microns to millimetres, assumes millimetres when units are unspecified,
 and interprets missing or disagreeing qform and sform headers.
 
+### Outputs
+
+Following the bundle's `SaveImaged` layout, `ct.nii.gz` produces
+`out/ct/ct_trans.nii.gz`, with the input shape and the ITK reader's affine. It holds
+float32 label indices from the bundled
+[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/src/swin_unetr_mlx/specification.json):
+
+| Index | Name | Index | Name |
+| ---: | :--- | ---: | :--- |
+| 0 | background | 7 | stomach |
+| 1 | spleen | 8 | aorta |
+| 2 | right kidney | 9 | inferior vena cava |
+| 3 | left kidney | 10 | portal and splenic veins |
+| 4 | gallbladder | 11 | pancreas |
+| 5 | esophagus | 12 | right adrenal gland |
+| 6 | liver | 13 | left adrenal gland |
+
+`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with run metadata in `details`.
+
+| Error | Raised when |
+| :--- | :--- |
+| `InvalidInputError` | The input is invalid |
+| `AssetNotReadyError` | Weights are missing or mismatched |
+| `ModelExecutionError` | Inference fails |
+| `MissingDependencyError` | The host is unsupported or Metal is unavailable |
+
+
 ### Python API
 
 ```python
@@ -85,41 +114,13 @@ network = load_model(Path("swinunetr.safetensors"))
 logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
 ```
 
-`forward_patch` takes finite float32 Bx1x96x96x96 windows and returns raw
-Bx14x96x96x96 logits, without file IO, intensity scaling, resampling, softmax or
-stitching. `SwinUNETR(weights, mx=mx)` runs on MLX arrays directly. Both default to
-`merging_profile="monai-1.4"`, the released bundle's repeated patch-merging phases;
-pass `merging_profile="monai-1.6"` to compare with MONAI 1.6. `load_model` checks
-names, shapes, dtypes, finite values and position-index ranges. Inference requires Apple Silicon with Metal.
-
-### Outputs
-
-Following the bundle's `SaveImaged` layout, `ct.nii.gz` produces
-`out/ct/ct_trans.nii.gz`, with the input shape and the ITK reader's affine. It holds
-float32 label indices from the bundled
-[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/src/swin_unetr_mlx/specification.json):
-
-| Index | Name |
-| ---: | --- |
-| 0 | background |
-| 1 | spleen |
-| 2 | right kidney |
-| 3 | left kidney |
-| 4 | gallbladder |
-| 5 | esophagus |
-| 6 | liver |
-| 7 | stomach |
-| 8 | aorta |
-| 9 | inferior vena cava |
-| 10 | portal and splenic veins |
-| 11 | pancreas |
-| 12 | right adrenal gland |
-| 13 | left adrenal gland |
-
-`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with run metadata in `details`.
-Invalid inputs raise `InvalidInputError`; missing or mismatched weights raise
-`AssetNotReadyError`; inference failures raise `ModelExecutionError`; an unsupported
-host or unavailable Metal raises `MissingDependencyError`.
+- `forward_patch` takes finite float32 Bx1x96x96x96 windows and returns raw
+  Bx14x96x96x96 logits, without file IO, intensity scaling, resampling, softmax or
+  stitching. `SwinUNETR(weights, mx=mx)` runs on MLX arrays directly.
+- Both default to `merging_profile="monai-1.4"`, the released bundle's repeated
+  patch-merging phases; pass `merging_profile="monai-1.6"` to compare with MONAI 1.6.
+- `load_model` checks names, shapes, dtypes, finite values and position-index ranges.
+- Inference requires Apple Silicon with Metal.
 
 ## License
 
