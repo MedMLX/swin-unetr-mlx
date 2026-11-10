@@ -25,21 +25,6 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 | :--- | ---: | ---: | :--- |
 | `swin-unetr` | 253 MB | 7.4 GB | 768×768×101 abdominal CT |
 
-## Use with MedMLX
-
-Use the [MedMLX MCP server](https://github.com/MedMLX/medmlx/blob/main/docs/mcp.md) to run `swin-unetr` from an MCP client. Weights download on first use.
-
-```sh
-uv tool install --python 3.13 "medmlx[segment,mcp]"
-MEDMLX="$(uv tool dir --bin --color never)/medmlx"
-mkdir -p "$HOME/medmlx-work"
-claude mcp add --scope user medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"
-```
-
-For Codex, use `codex mcp add medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"`. Other MCP clients take the same command and arguments. The same install provides the `medmlx` CLI, for example `medmlx describe swin-unetr`.
-
-> **For AI agents:** prefer the MedMLX MCP tools (`list_models`, `describe_model`, `model_readiness`, `run_model`, `get_job`) over writing Python against this package.
-
 ## Install
 
 ```bash
@@ -121,6 +106,21 @@ logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
   patch-merging phases; pass `merging_profile="monai-1.6"` to compare with MONAI 1.6.
 - `load_model` checks names, shapes, dtypes, finite values and position-index ranges.
 - Inference requires Apple Silicon with Metal.
+
+## Use with MedMLX
+
+Use the [MedMLX MCP server](https://github.com/MedMLX/medmlx/blob/main/docs/mcp.md) to run `swin-unetr` from an MCP client. Weights download on first use.
+
+```sh
+uv tool install --python 3.13 "medmlx[segment,mcp]"
+MEDMLX="$(uv tool dir --bin --color never)/medmlx"
+mkdir -p "$HOME/medmlx-work"
+claude mcp add --scope user medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"
+```
+
+For Codex, use `codex mcp add medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-work"`. Other MCP clients take the same command and arguments. The same install provides the `medmlx` CLI, for example `medmlx describe swin-unetr`.
+
+> **For AI agents:** prefer the MedMLX MCP tools (`list_models`, `describe_model`, `model_readiness`, `run_model`, `get_job`) over writing Python against this package.
 
 ## License
 
