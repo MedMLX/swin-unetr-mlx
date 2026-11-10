@@ -11,7 +11,7 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97_Hugging_Face-weights-yellow)](https://huggingface.co/MedMLX/swin-unetr-mlx)
 [![MedMLX](https://img.shields.io/badge/MedMLX-runtime-A51C30)](https://github.com/MedMLX/medmlx)
 
-<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/main/docs/showcase.png" alt="Abdominal CT and its organ segmentation" width="100%">
+<img src="https://raw.githubusercontent.com/MedMLX/swin-unetr-mlx/main/docs/showcase.gif" alt="Axial CT slices scrolling with their organ segmentation beside a rotating 3D rendering of the segmented anatomy" width="100%">
 
 </div>
 
