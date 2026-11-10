@@ -155,15 +155,27 @@ class SwinUNETR(ChannelLastGraph):
         qkv = mx.reshape(self.linear(x, f"{name}.qkv"), (b, n, 3, heads, c // heads))
         qkv = mx.transpose(qkv, (2, 0, 3, 1, 4))
         q, k, v = qkv[0] * (c // heads) ** -0.5, qkv[1], qkv[2]
-        score = q @ mx.swapaxes(k, -2, -1)
         index = mx.reshape(self.w[f"{name}.relative_position_index"][:n, :n], (-1,))
         bias = self.w[f"{name}.relative_position_bias_table"][index]
-        score = score + mx.transpose(mx.reshape(bias, (n, n, heads)), (2, 0, 1))[None]
-        if mask is not None:
-            nw = mask.shape[0]
-            score = mx.reshape(score, (b // nw, nw, heads, n, n)) + mask[None, :, None]
-            score = mx.reshape(score, (b, heads, n, n))
-        y = mx.reshape(mx.transpose(mx.softmax(score, axis=-1) @ v, (0, 2, 1, 3)), (b, n, c))
+        bias = mx.transpose(mx.reshape(bias, (n, n, heads)), (2, 0, 1))[None]
+        if mask is not None and b % mask.shape[0]:
+            raise ValueError("Window batch must contain complete spatial shift-mask groups")
+        # Windows are independent. Keep source scaling, bias, finite -100 mask
+        # and softmax arithmetic while capping each FP32 score matrix at 64 MiB.
+        windows_per_group = max(1, (64 * 1024**2) // (4 * heads * n * n))
+        parts: list[Array] = []
+        for start in range(0, b, windows_per_group):
+            stop = min(start + windows_per_group, b)
+            score = q[start:stop] @ mx.swapaxes(k[start:stop], -2, -1)
+            score = score + bias
+            if mask is not None:
+                indices = mx.arange(start, stop) % mask.shape[0]
+                score = score + mx.take(mask, indices, axis=0)[:, None]
+            part = mx.softmax(score, axis=-1) @ v[start:stop]
+            mx.eval(part)
+            parts.append(part)
+        attended = mx.concatenate(parts, axis=0) if len(parts) > 1 else parts[0]
+        y = mx.reshape(mx.transpose(attended, (0, 2, 1, 3)), (b, n, c))
         return self.linear(y, f"{name}.proj")
 
     def block(self, x: Array, name: str, heads: int, shifted: bool) -> Array:
