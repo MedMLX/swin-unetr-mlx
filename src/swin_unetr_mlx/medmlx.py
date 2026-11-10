@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -17,6 +18,8 @@ from swin_unetr_mlx._arrays import Float32Array, Float64Array
 from swin_unetr_mlx._records import RunResult, Runtime
 
 if TYPE_CHECKING:
+    from medmlx_core.volume_workspace import VolumeWorkspace
+
     from swin_unetr_mlx._types import CoreSlidingWindow
     from swin_unetr_mlx.network import SwinUNETR
 
@@ -49,6 +52,9 @@ def run(
     weights_path: str | None = None,
     output_dir: str,
     overwrite: bool = False,
+    sw_batch_size: int = CONFIG.sw_batch_size,
+    streaming: bool = False,
+    scratch_dir: str | None = None,
 ) -> RunResult:
     """Segment abdominal organs in one CT volume and write the label map.
 
@@ -69,6 +75,10 @@ def run(
             download and reuse the published model. Explicit files remain accepted.
         output_dir: Output root for the restored organ label map.
         overwrite: Replace an existing mask when true; defaults to False.
+        sw_batch_size: Positive number of windows evaluated together; source default four.
+        streaming: Blend into temporary mapped logits instead of a resident volume.
+        scratch_dir: Existing parent directory for streaming maps; system temporary
+            storage is used when omitted. Maps are removed after restoration.
 
     Returns:
         ``{"outputs": {"mask": path}, "details": {...}}``; ``details`` is described by
@@ -86,6 +96,13 @@ def run(
     """
     if type(overwrite) is not bool:
         raise InvalidInputError("overwrite must be boolean")
+    if type(sw_batch_size) is not int or sw_batch_size < 1:
+        raise InvalidInputError("sw_batch_size must be a positive integer")
+    if type(streaming) is not bool:
+        raise InvalidInputError("streaming must be boolean")
+    scratch = Path(scratch_dir).expanduser() if scratch_dir is not None else None
+    if streaming and scratch is not None and not scratch.is_dir():
+        raise InvalidInputError("scratch_dir must name an existing directory")
     image_file = Path(image_path).expanduser().resolve()
     output_root = Path(output_dir).expanduser().resolve()
     stem = Path(image_file.stem).stem if image_file.suffix == ".gz" else image_file.stem
@@ -100,28 +117,37 @@ def run(
     checkpoint = bundle_dir / "swinunetr.safetensors" if bundle_dir.is_dir() else bundle_dir
     weights = _weights_file(str(checkpoint))
     started = time.perf_counter()
-    shape, nibabel_affine = _validate_volume(image_file, "image_path")
+    data, nibabel_affine = _validate_volume(image_file, "image_path")
+    shape = (int(data.shape[0]), int(data.shape[1]), int(data.shape[2]))
     try:
-        data, reader_affine = transforms.read_itk(image_file)
+        reader_shape, reader_affine = transforms.read_itk_geometry(image_file)
     except RuntimeError as error:
         raise InvalidInputError(f"ITK cannot read image_path: {image_file}: {error}") from error
-    if data.shape != shape:
+    if reader_shape != shape:
         raise InvalidInputError(
-            f"image_path reads as {data.shape} through ITK but {shape} through nibabel"
+            f"image_path reads as {reader_shape} through ITK but {shape} through nibabel"
         )
     _validate_geometry(reader_affine, nibabel_affine, "image_path")
     network = _load_network(weights)
     loaded = time.perf_counter()
     image, inverse = preprocess(data, reader_affine)
     prepared = time.perf_counter()
-    logits, runtime = _predict(network, image)
-    predicted = time.perf_counter()
-    # Softmax into the logits buffer and drop the logits, as ``postprocess`` would
-    # otherwise keep both full-size arrays alive during resampling.
-    probabilities = transforms.softmax(logits[0], out=logits[0])
-    del logits
-    mask = _restore(probabilities, inverse)
-    del probabilities
+    if streaming:
+        from medmlx_core.volume_workspace import VolumeWorkspace
+
+        context = VolumeWorkspace(scratch)
+    else:
+        context = nullcontext(None)
+    with context as workspace:
+        logits, runtime = _predict(
+            network, image, sw_batch_size=sw_batch_size, workspace=workspace,
+        )
+        predicted = time.perf_counter()
+        # Reuse resident or mapped logits for probabilities through restoration.
+        probabilities = transforms.softmax(logits[0], out=logits[0])
+        del logits
+        mask = _restore(probabilities, inverse)
+        del probabilities
     _validate_mask(mask, shape)
     mask_path.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(mask_path, mask, reader_affine)
@@ -139,9 +165,10 @@ def run(
             "output_dtype": CONFIG.output_dtype,
             "sliding_window": {
                 "roi_size": list(CONFIG.roi_size),
-                "sw_batch_size": CONFIG.sw_batch_size,
+                "sw_batch_size": sw_batch_size,
                 "overlap": CONFIG.overlap,
             },
+            "streaming": streaming,
             "mlx_device": runtime["device"],
             "peak_mlx_bytes": runtime["peak_bytes"],
             "seconds": {
@@ -225,11 +252,13 @@ def _weights_file(weights_path: str) -> Path:
     return path
 
 
-def _validate_volume(path: Path, role: str) -> tuple[tuple[int, int, int], Float64Array]:
+def _validate_volume(path: Path, role: str) -> tuple[Float32Array, Float64Array]:
     """Admit a real, finite float32-range 3D NIfTI with valid spatial units.
 
-    Returns the shape and NiBabel's RAS affine converted to millimetres, the unit
-    ITK reports: metres and microns are scaled and unspecified units count as mm.
+    Return admitted pixels and NiBabel's RAS affine in millimetres. Source values
+    are checked before FP32 conversion, retaining fractional/range/nonfinite
+    admission. ITK independently reads only geometry: its pixel reader replaces
+    stored NaNs with zero and cannot own the source-value check.
     """
     from swin_unetr_mlx._nifti import ImageFileError, nib
 
@@ -262,7 +291,7 @@ def _validate_volume(path: Path, role: str) -> tuple[tuple[int, int, int], Float
     # NIfTI unit codes 1-3 are metre, millimetre, micron; 0 (unknown) reads as mm.
     millimetres = {0: 1.0, 1: 1000.0, 2: 1.0, 3: 0.001}[int(image.header["xyzt_units"]) & 0x07]
     affine = affine * np.array([[millimetres], [millimetres], [millimetres], [1.0]])
-    return (int(raw.shape[0]), int(raw.shape[1]), int(raw.shape[2])), affine
+    return np.asarray(raw, dtype=np.float32), affine
 
 
 def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, role: str) -> None:
@@ -278,7 +307,8 @@ def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, r
         raise InvalidInputError(
             f"{role} has conflicting NIfTI geometry: ITK affine "
             f"{np.round(itk_affine, 4).tolist()} differs from NiBabel affine "
-            f"{np.round(nibabel_affine, 4).tolist()}; set a qform or sform code with matching matrices"
+            f"{np.round(nibabel_affine, 4).tolist()}; "
+            "set a qform or sform code with matching matrices"
         )
 
 
@@ -297,8 +327,11 @@ def _load_network(weights: Path) -> SwinUNETR:
         ) from error
 
 
-def _predict(network: SwinUNETR, image: Float32Array) -> tuple[Float32Array, Runtime]:
-    """The bundle's ``SlidingWindowInferer`` (96^3, batch 4, overlap 0.5, constant).
+def _predict(
+    network: SwinUNETR, image: Float32Array, *, sw_batch_size: int = CONFIG.sw_batch_size,
+    workspace: VolumeWorkspace | None = None,
+) -> tuple[Float32Array, Runtime]:
+    """Run the bundle's windows with selected batching and optional mapped logits.
 
     ``image`` is the preprocessed ``(1, 1, *spatial)`` array. Returns float32 logits
     ``(1, 14, *spatial)`` and the MLX device and peak memory in bytes.
@@ -313,9 +346,10 @@ def _predict(network: SwinUNETR, image: Float32Array) -> tuple[Float32Array, Run
         logits = sliding_window_inference(
             np.ascontiguousarray(image, dtype=np.float32),
             CONFIG.roi_size,
-            CONFIG.sw_batch_size,
+            sw_batch_size,
             network,
             overlap=CONFIG.overlap,
+            workspace=workspace,
         )
     except (RuntimeError, ValueError) as error:
         raise ModelExecutionError(f"SwinUNETR MLX inference failed: {error}") from error

@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     import mlx.core as mx
     from medmlx_core.typing import MlxRuntime
+    from medmlx_core.volume_workspace import VolumeWorkspace
 
     from swin_unetr_mlx._arrays import Float32Array
 
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
             *,
             overlap: float,
             with_coord: bool = False,
+            workspace: VolumeWorkspace | None = None,
         ) -> Float32Array:
             """Run overlapping window inference and return combined float32 outputs."""
             ...

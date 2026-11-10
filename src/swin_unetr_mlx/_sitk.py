@@ -21,7 +21,22 @@ class Image(Protocol):
         ...
 
 
+class ImageFileReader(Image, Protocol):
+    def SetFileName(self, name: str) -> None:
+        """Select the source image."""
+        ...
+    def ReadImageInformation(self) -> None:
+        """Read geometry and metadata without decoding pixels."""
+        ...
+    def GetSize(self) -> tuple[int, ...]:
+        """Return the image size in ITK axis order."""
+        ...
+
+
 class SimpleITKModule(Protocol):
+    def ImageFileReader(self) -> ImageFileReader:
+        """Create a reader supporting header-only geometry inspection."""
+        ...
     def ReadImage(self, fileName: str) -> Image:
         """Read an image from a file."""
         ...

@@ -55,7 +55,8 @@ def test_transforms_match_the_bundle(tmp_path: Path, case: str) -> None:
     assert np.array_equal(mask, arrays[f"{case}::mask"])
 
 
-def test_run_matches_upstream(tmp_path: Path, mx: MLX) -> None:
+@pytest.mark.parametrize("batch_size,streaming", [(4, False), (1, True), (2, True)])
+def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streaming: bool) -> None:
     """One 96^3 window of the released graph with seeded weights matches the upstream mask."""
     source = tmp_path / "ct.nii.gz"
     reference = recording("runner")
@@ -69,7 +70,15 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX) -> None:
     folder.mkdir()
     (folder / "swinunetr.safetensors").symlink_to(blob)
     output_dir = tmp_path / "out"
-    result = run(image_path=str(source), weights_path=str(folder), output_dir=str(output_dir))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = run(
+        image_path=str(source), weights_path=str(folder), output_dir=str(output_dir),
+        sw_batch_size=batch_size, streaming=streaming, scratch_dir=str(scratch),
+    )
+    assert result["details"]["sliding_window"]["sw_batch_size"] == batch_size
+    assert result["details"]["streaming"] is streaming
+    assert not list(scratch.iterdir())
     assert result["outputs"] == {"mask": (output_dir.resolve() / saved["path"]).as_posix()}
     written = nib.load(result["outputs"]["mask"])
     data = np.asanyarray(written.dataobj)
@@ -169,8 +178,26 @@ def test_run_requires_reader_geometry_agreement(
         return
     reference = nib.load(path).affine * np.r_[[millimetres] * 3, 1.0][:, None]
     np.testing.assert_allclose(transforms.read_itk(path)[1], reference, rtol=1e-6, atol=1e-3)
+    header_shape, header_affine = transforms.read_itk_geometry(path)
+    assert header_shape == data.shape
+    np.testing.assert_allclose(header_affine, reference, rtol=1e-6, atol=1e-3)
 
 
 def _reject_weights(weights: Path) -> None:
     """Stand in for the weights load reached only after the geometry check passes."""
     raise AssetNotReadyError("placeholder weights", reason="placeholder", hint="")
+
+
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf, np.finfo(np.float64).max])
+def test_runner_rejects_invalid_source_values_before_any_reader_cast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_value: float,
+) -> None:
+    source = tmp_path / "source.nii.gz"
+    data = np.zeros((4, 5, 6), dtype=np.float64)
+    data[1, 2, 3] = bad_value
+    nib.save(nib.Nifti1Image(data, np.eye(4)), source)
+    weights = tmp_path / "swinunetr.safetensors"
+    weights.write_bytes(b"placeholder")
+    monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
+    with pytest.raises(InvalidInputError, match=r"non-finite|finite float32 range"):
+        run(image_path=str(source), weights_path=str(weights), output_dir=str(tmp_path / "out"))

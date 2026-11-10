@@ -75,7 +75,8 @@ float32 label indices from the bundled
 | 5 | esophagus | 12 | right adrenal gland |
 | 6 | liver | 13 | left adrenal gland |
 
-`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with run metadata in `details`.
+`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with the labels present, shapes,
+sliding-window settings, MLX device, peak memory and timings in `details`.
 
 | Error | Raised when |
 | :--- | :--- |

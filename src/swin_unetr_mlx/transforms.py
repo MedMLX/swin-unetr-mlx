@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -34,6 +34,9 @@ from medmlx_core.geometry import (
 
 from swin_unetr_mlx._arrays import Float32Array, Float64Array, HostArray, Int64Array
 from swin_unetr_mlx._nifti import nib
+
+if TYPE_CHECKING:
+    from swin_unetr_mlx._sitk import Image
 
 # monai.data.utils.AFFINE_TOL
 AFFINE_TOL = 1e-3
@@ -69,13 +72,28 @@ def read_itk(path: Path) -> tuple[Float32Array, Float64Array]:
 
     image = sitk.ReadImage(str(path))
     data = sitk.GetArrayFromImage(image).T.astype(np.float32, copy=False)
+    return data, _itk_affine(image)
+
+
+def read_itk_geometry(path: Path) -> tuple[tuple[int, ...], Float64Array]:
+    """Read the same ITK-selected size and RAS affine without decoding voxels."""
+    from swin_unetr_mlx._sitk import sitk
+
+    reader = sitk.ImageFileReader()
+    reader.SetFileName(str(path))
+    reader.ReadImageInformation()
+    return reader.GetSize(), _itk_affine(reader)
+
+
+def _itk_affine(image: Image) -> Float64Array:
+    """Convert ITK geometry from LPS to the bundle's RAS affine."""
     direction = np.asarray(image.GetDirection(), dtype=np.float64).reshape(3, 3)
     spacing = np.asarray(image.GetSpacing(), dtype=np.float64)
     origin = np.asarray(image.GetOrigin(), dtype=np.float64)
     affine = np.eye(4)
     affine[:3, :3] = direction @ np.diag(spacing)
     affine[:3, -1] = origin
-    return data, np.diag([-1, -1, 1, 1]).astype(affine.dtype) @ affine
+    return np.diag([-1, -1, 1, 1]).astype(affine.dtype) @ affine
 
 
 def orient(

@@ -87,6 +87,7 @@ class Details(TypedDict):
     """
 
     weights_revision: NotRequired[str | None]
+    streaming: bool
     bundle: str
     labels: dict[str, str]
     labels_present: list[int]
