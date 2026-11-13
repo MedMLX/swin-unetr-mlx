@@ -42,7 +42,6 @@ class RunnerMetadata(TypedDict):
 
 
 class NetworkMetadata(TypedDict):
-    input_seed: int
     weights_seed: int
     sample_stride: int
     logits_tolerance: ErrorBound

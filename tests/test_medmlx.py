@@ -1,6 +1,6 @@
 """Bundle transform parity with MONAI, an end-to-end run and argument rejection.
 
-The parity fixture records the pinned upstream MONAI 1.4 transforms on seeded inputs.
+The parity fixture records pinned upstream MONAI 1.4 transforms on HCC-TACE CT.
 """
 
 from __future__ import annotations

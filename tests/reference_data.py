@@ -35,7 +35,7 @@ class ReferenceRecording:
 
 def recording(name: str) -> ReferenceRecording:
     """Load a named reference archive and validate its recorded metadata."""
-    path = ROOT / f"{name}.npz"
+    path = ROOT.parent.parent / "work/real-reference" / f"{name}.npz"
     if not path.is_file():
         raise FileNotFoundError(f"Missing upstream recording: {path}")
     with np.load(path, allow_pickle=False) as data:
