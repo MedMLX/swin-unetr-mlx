@@ -75,8 +75,9 @@ float32 label indices from the bundled
 | 5 | esophagus | 12 | right adrenal gland |
 | 6 | liver | 13 | left adrenal gland |
 
-`run` returns `{"outputs": {"mask": path}, "details": {...}}`, with the labels present, shapes,
-sliding-window settings, MLX device, peak memory and timings in `details`.
+`run` returns `{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}`. The
+mask artifact is a label map on the input grid with the 14 classes above; `details` holds the
+labels present, shapes, sliding-window settings, MLX device, peak memory and timings.
 
 | Error | Raised when |
 | :--- | :--- |

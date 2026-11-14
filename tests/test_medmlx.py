@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from fixture_contracts import RunnerMetadata
 from medmlx_core.errors import AssetNotReadyError, InvalidInputError
+from medmlx_core.outputs import validate_outputs
 from medmlx_core.typing import ArrayFactory
 from reference_data import recording, seeded_native_weights
 
@@ -80,6 +81,11 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streamin
     assert result["details"]["streaming"] is streaming
     assert not list(scratch.iterdir())
     assert result["outputs"] == {"mask": (output_dir.resolve() / saved["path"]).as_posix()}
+    mask_artifact = validate_outputs(result).artifacts["mask"]
+    assert (mask_artifact["kind"], mask_artifact.get("grid_of")) == ("label_map", "image_path")
+    assert mask_artifact.get("labels") == [
+        {"value": value, "name": name} for value, name in medmlx.LABELS.items()
+    ]
     written = nib.load(result["outputs"]["mask"])
     data = np.asanyarray(written.dataobj)
     assert np.array_equal(written.affine, np.array(saved["affine"]))
@@ -90,7 +96,7 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streamin
 @pytest.mark.parametrize(
     ("problem", "error"),
     [("torch_weights", AssetNotReadyError), ("overwrite_not_bool", InvalidInputError),
-     ("existing_output", InvalidInputError)],
+     ("existing_output", InvalidInputError), ("missing_image", InvalidInputError)],
 )
 def test_run_rejects_invalid_arguments_before_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, problem: str, error: type[Exception],
@@ -109,6 +115,8 @@ def test_run_rejects_invalid_arguments_before_download(
         weights = str(tmp_path / "model.pt")
     elif problem == "overwrite_not_bool":
         overwrite = cast(bool, "true")
+    elif problem == "missing_image":
+        image = tmp_path / "absent.nii.gz"
     else:
         (output / "axis").mkdir(parents=True)
         (output / "axis/axis_trans.nii.gz").write_bytes(b"existing output")

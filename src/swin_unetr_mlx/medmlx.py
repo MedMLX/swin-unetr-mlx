@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 import numpy as np
 from medmlx_core.errors import AssetNotReadyError, InvalidInputError, ModelExecutionError
+from medmlx_core.outputs import artifact
 from medmlx_core.weights import weights_dir, weights_revision
 
 from swin_unetr_mlx import transforms
@@ -48,13 +49,13 @@ MODEL = {
 
 def run(
     *,
-    image_path: str,
-    weights_path: str | None = None,
-    output_dir: str,
+    image_path: str | Path,
+    weights_path: str | Path | None = None,
+    output_dir: str | Path,
     overwrite: bool = False,
     sw_batch_size: int = CONFIG.sw_batch_size,
     streaming: bool = False,
-    scratch_dir: str | None = None,
+    scratch_dir: str | Path | None = None,
 ) -> RunResult:
     """Segment abdominal organs in one CT volume and write the label map.
 
@@ -81,8 +82,11 @@ def run(
             storage is used when omitted. Maps are removed after restoration.
 
     Returns:
-        ``{"outputs": {"mask": path}, "details": {...}}``; ``details`` is described by
-        ``swin_unetr_mlx._records.Details`` and always has ``requires_human_review`` true.
+        ``{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}``. The
+        mask artifact is a ``label_map`` in ``image_physical`` space on ``image_path``'s grid,
+        labelled with the bundle's 14 classes (0 background and 13 organs). ``details`` is
+        described by ``swin_unetr_mlx._records.Details`` and always has
+        ``requires_human_review`` true.
 
     Raises:
         InvalidInputError: ``overwrite`` is not a bool, the output exists without
@@ -110,6 +114,8 @@ def run(
     mask_path = folder / f"{stem}_{CONFIG.output_postfix}.nii.gz"
     if mask_path.exists() and not overwrite:
         raise InvalidInputError(f"Output exists: {mask_path}; pass overwrite=true to replace it")
+    if not image_file.is_file():
+        raise InvalidInputError(f"image_path not found: {image_file}")
     bundle_dir = (
         weights_dir("swin-unetr") if weights_path is None else Path(weights_path).expanduser()
     )
@@ -154,6 +160,14 @@ def run(
     finished = time.perf_counter()
     return {
         "outputs": {"mask": mask_path.as_posix()},
+        "artifacts": {
+            "mask": artifact(
+                kind="label_map",
+                coordinate_space="image_physical",
+                grid_of="image_path",
+                labels=[{"value": value, "name": name} for value, name in LABELS.items()],
+            )
+        },
         "details": {
             "weights_revision": weights_revision(weights.parent),
             "bundle": BUNDLE,
@@ -262,8 +276,6 @@ def _validate_volume(path: Path, role: str) -> tuple[Float32Array, Float64Array]
     """
     from swin_unetr_mlx._nifti import ImageFileError, nib
 
-    if not path.is_file():
-        raise InvalidInputError(f"{role} not found: {path}")
     try:
         image = nib.load(path.as_posix())
     except (OSError, ImageFileError) as error:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
+from medmlx_core.outputs import Artifact
+
 
 class ErrorBound(TypedDict):
     atol: float
@@ -106,4 +108,5 @@ class RunResult(TypedDict):
     """Result of ``swin_unetr_mlx.medmlx.run``: ``outputs["mask"]`` is the mask path."""
 
     outputs: dict[str, str]
+    artifacts: dict[str, Artifact]
     details: Details
