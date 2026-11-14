@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from medmlx_core.outputs import Artifact
+from medmlx_core.outputs import RunResult as _RunResult
 
 
 class ErrorBound(TypedDict):
@@ -104,9 +104,5 @@ class Details(TypedDict):
     requires_human_review: bool
 
 
-class RunResult(TypedDict):
-    """Result of ``swin_unetr_mlx.medmlx.run``: ``outputs["mask"]`` is the mask path."""
-
-    outputs: dict[str, str]
-    artifacts: dict[str, Artifact]
-    details: Details
+# Result of ``swin_unetr_mlx.medmlx.run``: ``outputs["mask"]`` is the mask path.
+type RunResult = _RunResult[Details]
