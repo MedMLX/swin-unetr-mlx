@@ -1,26 +1,33 @@
-"""Native MLX SwinUNETR; network names load on first access."""
+"""Abdominal CT organ segmentation with SwinUNETR in native MLX.
+
+``segment`` runs one CT end to end. Names load on first access, so importing the
+package does not import MLX.
+"""
 
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from swin_unetr_mlx.inference import forward_patch as forward_patch
+    from swin_unetr_mlx.medmlx import segment as segment
     from swin_unetr_mlx.network import SwinUNETR as SwinUNETR
-    from swin_unetr_mlx.weights import load_model as load_model
+    from swin_unetr_mlx.weights import load_network as load_network
 
 from swin_unetr_mlx.specification import specification
 
 _EXPORTS = {
     "SwinUNETR": "swin_unetr_mlx.network",
     "forward_patch": "swin_unetr_mlx.inference",
-    "load_model": "swin_unetr_mlx.weights",
+    "load_network": "swin_unetr_mlx.weights",
+    "segment": "swin_unetr_mlx.medmlx",
 }
 
 __version__ = "0.2.7"
 __all__ = [
     "SwinUNETR",
     "forward_patch",
-    "load_model",
+    "load_network",
+    "segment",
     "specification",
 ]
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import medmlx_core.weights as core_weights
 import numpy as np
 import pytest
 from fixture_contracts import RunnerMetadata
@@ -18,7 +19,7 @@ from reference_data import recording, seeded_native_weights
 
 from swin_unetr_mlx import medmlx, transforms
 from swin_unetr_mlx._nifti import nib
-from swin_unetr_mlx.medmlx import run
+from swin_unetr_mlx.medmlx import segment
 
 if TYPE_CHECKING:
     from swin_unetr_mlx._types import MLX
@@ -73,14 +74,14 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streamin
     output_dir = tmp_path / "out"
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    result = run(
+    result = segment(
         image_path=str(source), weights_path=str(folder), output_dir=str(output_dir),
         sw_batch_size=batch_size, streaming=streaming, scratch_dir=str(scratch),
     )
     assert result["details"]["sliding_window"]["sw_batch_size"] == batch_size
     assert result["details"]["streaming"] is streaming
     assert not list(scratch.iterdir())
-    assert result["outputs"] == {"mask": (output_dir.resolve() / saved["path"]).as_posix()}
+    assert result["outputs"] == {"mask": (output_dir.absolute() / "mask.nii.gz").as_posix()}
     mask_artifact = validate_outputs(result).artifacts["mask"]
     assert (mask_artifact["kind"], mask_artifact.get("grid_of")) == ("label_map", "image_path")
     assert mask_artifact.get("labels") == [
@@ -107,7 +108,7 @@ def test_run_rejects_invalid_arguments_before_download(
         """Fail the test if the runner reaches the weights download."""
         raise AssertionError(f"downloaded {model_id}")
 
-    monkeypatch.setattr(medmlx, "weights_dir", no_download)
+    monkeypatch.setattr(core_weights, "weights_dir", no_download)
     image, output = _image(tmp_path, "axis"), tmp_path / "out"
     weights, overwrite = None, False
     if problem == "torch_weights":
@@ -118,10 +119,10 @@ def test_run_rejects_invalid_arguments_before_download(
     elif problem == "missing_image":
         image = tmp_path / "absent.nii.gz"
     else:
-        (output / "axis").mkdir(parents=True)
-        (output / "axis/axis_trans.nii.gz").write_bytes(b"existing output")
+        output.mkdir()
+        (output / "mask.nii.gz").write_bytes(b"existing output")
     with pytest.raises(error):
-        run(
+        segment(
             image_path=str(image), weights_path=weights, output_dir=str(output),
             overwrite=overwrite,
         )
@@ -180,7 +181,7 @@ def test_run_requires_reader_geometry_agreement(
     monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
     error = AssetNotReadyError if accepted else InvalidInputError
     with pytest.raises(error) as raised:
-        run(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
+        segment(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
     if not accepted:
         assert "conflicting NIfTI geometry" in str(raised.value)
         return
@@ -204,8 +205,7 @@ def test_runner_rejects_invalid_source_values_before_any_reader_cast(
     data = np.zeros((4, 5, 6), dtype=np.float64)
     data[1, 2, 3] = bad_value
     nib.save(nib.Nifti1Image(data, np.eye(4)), source)
-    weights = tmp_path / "swinunetr.safetensors"
-    weights.write_bytes(b"placeholder")
+    (tmp_path / "swinunetr.safetensors").write_bytes(b"placeholder")
     monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
     with pytest.raises(InvalidInputError, match=r"non-finite|finite float32 range"):
-        run(image_path=str(source), weights_path=str(weights), output_dir=str(tmp_path / "out"))
+        segment(image_path=str(source), weights_path=str(tmp_path), output_dir=str(tmp_path / "out"))

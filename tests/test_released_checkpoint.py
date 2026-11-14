@@ -15,7 +15,7 @@ from medmlx_core.errors import InvalidInputError
 from medmlx_core.typing import ArrayFactory
 from reference_data import seeded_native_weights
 
-from swin_unetr_mlx import forward_patch, load_model
+from swin_unetr_mlx import forward_patch, load_network
 
 
 def test_converted_model_matches_independent_source(
@@ -28,7 +28,7 @@ def test_converted_model_matches_independent_source(
     if checkpoint is None or reference is None or input_path is None:
         pytest.skip("Set MODEL_WEIGHTS, MODEL_NETWORK_INPUT and MODEL_SOURCE_OUTPUT")
     request.getfixturevalue("mx")
-    network = load_model(Path(checkpoint))
+    network = load_network(Path(checkpoint))
     values = np.load(input_path, allow_pickle=False)
     assert values.shape == (1, 1, 96, 96, 96)
     actual = forward_patch(network, values)
@@ -50,7 +50,7 @@ def converted_weights(
         str(destination),
         {name: cast(ArrayFactory, mx.array)(value) for name, value in arrays.items()},
     )
-    load_model(destination)
+    load_network(destination)
     return cast("dict[str, Array]", mx.load(str(destination)))
 
 
@@ -74,4 +74,4 @@ def test_converted_checkpoint_admission(
     destination = tmp_path / "invalid.safetensors"
     mx.save_safetensors(str(destination), weights)
     with pytest.raises(InvalidInputError):
-        load_model(destination)
+        load_network(destination)

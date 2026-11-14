@@ -15,7 +15,7 @@ from medmlx_core.typing import ArrayFactory
 from real_inputs import network_input
 from reference_data import ReferenceRecording, recording, seeded_native_weights
 
-from swin_unetr_mlx import forward_patch, load_model
+from swin_unetr_mlx import forward_patch, load_network
 from swin_unetr_mlx._arrays import Float32Array, Int32Array, UInt8Array
 
 
@@ -63,6 +63,6 @@ def test_seeded_network_matches_upstream(tmp_path: Path, mx: MLX) -> None:
     mx.save_safetensors(
         str(path), {key: cast(ArrayFactory, mx.array)(value) for key, value in weights.items()}
     )
-    network = load_model(path)
+    network = load_network(path)
     values = network_input()
     _assert_network_reference(forward_patch(network, values), reference)

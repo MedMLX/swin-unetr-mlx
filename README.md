@@ -34,25 +34,28 @@ uv pip install "swin-unetr-mlx>=0.2.7"
 ## Run
 
 ```python
-from swin_unetr_mlx.medmlx import run
+from swin_unetr_mlx import segment
 
-result = run(image_path="ct.nii.gz", output_dir="out")
+result = segment(image_path="ct.nii.gz", output_dir="out")
 print(result["outputs"]["mask"])
 ```
 
 Omitting `weights_path` downloads `MedMLX/swin-unetr-mlx` into the shared MedMLX cache
 on first use; with MedMLX installed, `medmlx setup swin-unetr` downloads it ahead of
-time. To use your own copy, pass a folder containing `swinunetr.safetensors`, or a
-checkpoint file, as `weights_path`.
+time. To use your own copy, pass the folder containing `swinunetr.safetensors` as
+`weights_path`.
 
 ### Inputs
 
 | Argument | Meaning |
 | --- | --- |
 | `image_path` | One 3D abdominal CT in NIfTI, in Hounsfield units |
-| `output_dir` | Output root, created if needed |
-| `weights_path` | Optional `.safetensors` file or a folder containing it |
+| `output_dir` | Directory for `mask.nii.gz`, created if needed |
+| `weights_path` | Optional folder containing `swinunetr.safetensors` |
 | `overwrite` | `False` by default; an existing mask is replaced only when `True` |
+| `sw_batch_size` | Windows per network call, 4 by default |
+| `streaming` | Blend into temporary memory-mapped logits instead of a resident volume |
+| `scratch_dir` | Parent folder for the streaming maps; the system temporary folder by default |
 
 Voxels must be finite and representable in float32. ITK reads the image: it converts
 metres and microns to millimetres, assumes millimetres when units are unspecified,
@@ -60,8 +63,7 @@ and interprets missing or disagreeing qform and sform headers.
 
 ### Outputs
 
-Following the bundle's `SaveImaged` layout, `ct.nii.gz` produces
-`out/ct/ct_trans.nii.gz`, with the input shape and the ITK reader's affine. It holds
+The mask is `out/mask.nii.gz`, with the input shape and the ITK reader's affine. It holds
 float32 label indices from the bundled
 [BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.2.7/src/swin_unetr_mlx/specification.json):
 
@@ -75,7 +77,7 @@ float32 label indices from the bundled
 | 5 | esophagus | 12 | right adrenal gland |
 | 6 | liver | 13 | left adrenal gland |
 
-`run` returns `{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}`. The
+`segment` returns `{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}`. The
 mask artifact is a label map on the input grid with the 14 classes above; `details` holds the
 labels present, shapes, sliding-window settings, MLX device, peak memory and timings.
 
@@ -93,9 +95,9 @@ labels present, shapes, sliding-window settings, MLX device, peak memory and tim
 from pathlib import Path
 
 import numpy as np
-from swin_unetr_mlx import forward_patch, load_model
+from swin_unetr_mlx import forward_patch, load_network
 
-network = load_model(Path("swinunetr.safetensors"))
+network = load_network(Path("swinunetr.safetensors"))
 logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
 ```
 
@@ -104,7 +106,7 @@ logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
   stitching. `SwinUNETR(weights, mx=mx)` runs on MLX arrays directly.
 - Both default to `merging_profile="monai-1.4"`, the released bundle's repeated
   patch-merging phases; pass `merging_profile="monai-1.6"` to compare with MONAI 1.6.
-- `load_model` checks names, shapes, dtypes, finite values and position-index ranges.
+- `load_network` checks names, shapes, dtypes, finite values and position-index ranges.
 - Inference requires Apple Silicon with Metal.
 
 ## Use with MedMLX

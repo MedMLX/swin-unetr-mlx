@@ -7,8 +7,6 @@ NumPy and SimpleITK supply the volume transforms.
 
 from __future__ import annotations
 
-import os
-import tempfile
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -25,8 +23,9 @@ if TYPE_CHECKING:
 
 import numpy as np
 from medmlx_core.errors import AssetNotReadyError, InvalidInputError, ModelExecutionError
+from medmlx_core.files import input_file, output_targets, publish
 from medmlx_core.outputs import artifact
-from medmlx_core.weights import weights_dir, weights_revision
+from medmlx_core.weights import model_folder, weights_revision
 
 from swin_unetr_mlx import transforms
 from swin_unetr_mlx.specification import bundle_config
@@ -39,7 +38,7 @@ MODEL = {
     "id": "swin-unetr",
     "label": "SwinUNETR BTCV",
     "task": "segmentation",
-    "run": "swin_unetr_mlx.medmlx:run",
+    "run": "swin_unetr_mlx.medmlx:segment",
     # Measured MLX peak for a 768x768x101 abdominal CT; larger inputs need more.
     "peak_memory_gb": 7.5,
     "summary": ("MONAI swin_unetr_btcv_segmentation: 13 abdominal organs in contrast-enhanced CT."),
@@ -47,7 +46,11 @@ MODEL = {
 }
 
 
-def run(
+#: The mask's file name inside ``output_dir``.
+OUTPUT_NAME = "mask.nii.gz"
+
+
+def segment(
     *,
     image_path: str | Path,
     weights_path: str | Path | None = None,
@@ -62,19 +65,18 @@ def run(
     ``image_path`` is expected to be a 3D CT NIfTI in Hounsfield units; both
     NiBabel and ITK must read it, but the runner does not explicitly check its
     format. Omit ``weights_path`` to download and reuse ``MedMLX/swin-unetr-mlx``.
-    An explicit model folder contains ``swinunetr.safetensors``. Native
-    ``.safetensors`` checkpoint-file paths remain accepted.
-    Writes ``<input>/<input>_trans.nii.gz`` under ``output_dir``, with the input
-    shape and ITK reader's affine, and float32 labels 0-13 as ``SaveImaged`` does. An
-    existing mask is replaced only when ``overwrite`` is true (default false).
+    An explicit model folder contains ``swinunetr.safetensors``.
+    Writes ``mask.nii.gz`` in ``output_dir``, with the input shape and ITK reader's
+    affine, and float32 labels 0-13 as ``SaveImaged`` does. An existing mask is
+    replaced only when ``overwrite`` is true (default false).
     The image is rejected unless NiBabel's affine, converted to millimetres, matches
     the ITK affine, so conflicting qform/sform geometry never selects a reader's choice.
 
     Args:
         image_path: Finite 3D CT NIfTI in Hounsfield units, readable by NiBabel and ITK.
         weights_path: Optional folder containing ``swinunetr.safetensors``; omit to
-            download and reuse the published model. Explicit files remain accepted.
-        output_dir: Output root for the restored organ label map.
+            download and reuse the published model.
+        output_dir: Directory for ``mask.nii.gz``, the restored organ label map.
         overwrite: Replace an existing mask when true; defaults to False.
         sw_batch_size: Positive number of windows evaluated together; source default four.
         streaming: Blend into temporary mapped logits instead of a resident volume.
@@ -92,14 +94,12 @@ def run(
         InvalidInputError: ``overwrite`` is not a bool, the output exists without
             ``overwrite``, or the image is missing, not a finite 3D NIfTI with positive
             spacing, or reads with different shapes or affines through ITK and nibabel.
-        AssetNotReadyError: The weights file is missing, not ``.safetensors``, or does
-            not match the pinned graph.
+        AssetNotReadyError: ``weights_path`` is not a folder, or its
+            ``swinunetr.safetensors`` is missing or does not match the pinned graph.
         ModelExecutionError: Inference failed or the mask is off the source grid or has
             labels outside 0-13.
         MissingDependencyError: The host is unsupported or the MLX Metal GPU is unavailable.
     """
-    if type(overwrite) is not bool:
-        raise InvalidInputError("overwrite must be boolean")
     if type(sw_batch_size) is not int or sw_batch_size < 1:
         raise InvalidInputError("sw_batch_size must be a positive integer")
     if type(streaming) is not bool:
@@ -107,21 +107,11 @@ def run(
     scratch = Path(scratch_dir).expanduser() if scratch_dir is not None else None
     if streaming and scratch is not None and not scratch.is_dir():
         raise InvalidInputError("scratch_dir must name an existing directory")
-    image_file = Path(image_path).expanduser().resolve()
-    output_root = Path(output_dir).expanduser().resolve()
-    stem = Path(image_file.stem).stem if image_file.suffix == ".gz" else image_file.stem
-    folder = output_root / stem if CONFIG.separate_folder else output_root
-    mask_path = folder / f"{stem}_{CONFIG.output_postfix}.nii.gz"
-    if mask_path.exists() and not overwrite:
-        raise InvalidInputError(f"Output exists: {mask_path}; pass overwrite=true to replace it")
-    if not image_file.is_file():
-        raise InvalidInputError(f"image_path not found: {image_file}")
-    bundle_dir = (
-        weights_dir("swin-unetr") if weights_path is None else Path(weights_path).expanduser()
-    )
-    # Preserve explicit checkpoint-file callers and named cache symlinks.
-    checkpoint = bundle_dir / "swinunetr.safetensors" if bundle_dir.is_dir() else bundle_dir
-    weights = _weights_file(str(checkpoint))
+    image_file = input_file("image_path", image_path)
+    mask_path = output_targets(
+        output_dir, {"mask": OUTPUT_NAME}, overwrite=overwrite, inputs=[image_file]
+    )["mask"]
+    weights = _weights_file(model_folder("swin-unetr", weights_path) / "swinunetr.safetensors")
     started = time.perf_counter()
     data, nibabel_affine = _validate_volume(image_file, "image_path")
     shape = (int(data.shape[0]), int(data.shape[1]), int(data.shape[2]))
@@ -155,8 +145,11 @@ def run(
         mask = _restore(probabilities, inverse)
         del probabilities
     _validate_mask(mask, shape)
-    mask_path.parent.mkdir(parents=True, exist_ok=True)
-    write_atomic(mask_path, mask, reader_affine)
+    publish({
+        mask_path: lambda partial: transforms.write_nifti(
+            partial, mask, reader_affine, CONFIG.output_dtype
+        )
+    })
     finished = time.perf_counter()
     return {
         "outputs": {"mask": mask_path.as_posix()},
@@ -245,7 +238,7 @@ def _restore(
     return labels[0]
 
 
-def _weights_file(weights_path: str) -> Path:
+def _weights_file(weights_path: Path) -> Path:
     """Require an existing ``.safetensors`` file, keeping symlinked cache names intact."""
     # Preserve the named Hub-cache symlink: its underlying blob has no extension,
     # while MLX determines the tensor format from the supplied filename.
@@ -327,10 +320,10 @@ def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, r
 def _load_network(weights: Path) -> SwinUNETR:
     """Load the checkpoint, reporting any layout mismatch as ``AssetNotReadyError``."""
 
-    from swin_unetr_mlx.weights import load_model
+    from swin_unetr_mlx.weights import load_network
 
     try:
-        return load_model(weights)
+        return load_network(weights)
     except (InvalidInputError, ValueError, RuntimeError) as error:
         raise AssetNotReadyError(
             f"SwinUNETR weights {weights} do not match the pinned graph: {error}",
@@ -378,18 +371,4 @@ def _validate_mask(mask: Float32Array, shape: tuple[int, int, int]) -> None:
         raise ModelExecutionError("SwinUNETR exported labels outside the bundle contract")
 
 
-def write_atomic(path: Path, mask: Float32Array, affine: Float64Array) -> None:
-    """Write the mask NIfTI via a temporary file in ``path.parent``, then rename it.
-
-    A failure therefore never leaves a partial file at ``path``.
-    """
-    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".nii.gz", dir=path.parent)
-    os.close(descriptor)
-    try:
-        transforms.write_nifti(Path(name), mask, affine, CONFIG.output_dtype)
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-__all__ = ["MODEL", "run"]
+__all__ = ["MODEL", "OUTPUT_NAME", "segment"]

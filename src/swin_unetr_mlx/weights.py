@@ -48,7 +48,7 @@ def _validate(state: Mapping[str, HostArray]) -> dict[str, HostArray]:
     return arrays
 
 
-def load_model(weights_path: Path, *, merging_profile: MergingProfile = "monai-1.4") -> SwinUNETR:
+def load_network(weights_path: Path, *, merging_profile: MergingProfile = "monai-1.4") -> SwinUNETR:
     """Load converted safetensors into a ``SwinUNETR`` after checking every tensor.
 
     ``merging_profile`` selects the patch-merging graph (``"monai-1.4"``, the default and
