@@ -19,7 +19,7 @@ from reference_data import recording, seeded_native_weights
 
 from swin_unetr_mlx import medmlx, transforms
 from swin_unetr_mlx._nifti import nib
-from swin_unetr_mlx.medmlx import segment
+from swin_unetr_mlx.medmlx import run
 
 if TYPE_CHECKING:
     from swin_unetr_mlx._types import MLX
@@ -74,7 +74,7 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streamin
     output_dir = tmp_path / "out"
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    result = segment(
+    result = run(
         image_path=str(source), weights_path=str(folder), output_dir=str(output_dir),
         sw_batch_size=batch_size, streaming=streaming, scratch_dir=str(scratch),
     )
@@ -122,7 +122,7 @@ def test_run_rejects_invalid_arguments_before_download(
         output.mkdir()
         (output / "mask.nii.gz").write_bytes(b"existing output")
     with pytest.raises(error):
-        segment(
+        run(
             image_path=str(image), weights_path=weights, output_dir=str(output),
             overwrite=overwrite,
         )
@@ -181,7 +181,7 @@ def test_run_requires_reader_geometry_agreement(
     monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
     error = AssetNotReadyError if accepted else InvalidInputError
     with pytest.raises(error) as raised:
-        segment(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
+        run(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
     if not accepted:
         assert "conflicting NIfTI geometry" in str(raised.value)
         return
@@ -208,4 +208,4 @@ def test_runner_rejects_invalid_source_values_before_any_reader_cast(
     (tmp_path / "swinunetr.safetensors").write_bytes(b"placeholder")
     monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
     with pytest.raises(InvalidInputError, match=r"non-finite|finite float32 range"):
-        segment(image_path=str(source), weights_path=str(tmp_path), output_dir=str(tmp_path / "out"))
+        run(image_path=str(source), weights_path=str(tmp_path), output_dir=str(tmp_path / "out"))

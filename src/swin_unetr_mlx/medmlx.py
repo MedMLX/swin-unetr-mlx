@@ -38,7 +38,7 @@ MODEL = {
     "id": "swin-unetr",
     "label": "SwinUNETR BTCV",
     "task": "segmentation",
-    "run": "swin_unetr_mlx.medmlx:segment",
+    "run": "swin_unetr_mlx.medmlx:run",
     # Measured MLX peak for a 768x768x101 abdominal CT; larger inputs need more.
     "peak_memory_gb": 7.5,
     "summary": ("MONAI swin_unetr_btcv_segmentation: 13 abdominal organs in contrast-enhanced CT."),
@@ -50,7 +50,7 @@ MODEL = {
 OUTPUT_NAME = "mask.nii.gz"
 
 
-def segment(
+def run(
     *,
     image_path: str | Path,
     weights_path: str | Path | None = None,
@@ -371,4 +371,4 @@ def _validate_mask(mask: Float32Array, shape: tuple[int, int, int]) -> None:
         raise ModelExecutionError("SwinUNETR exported labels outside the bundle contract")
 
 
-__all__ = ["MODEL", "OUTPUT_NAME", "segment"]
+__all__ = ["MODEL", "OUTPUT_NAME", "run"]

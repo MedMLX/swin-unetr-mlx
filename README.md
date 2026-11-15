@@ -34,9 +34,9 @@ uv pip install "swin-unetr-mlx>=0.2.7"
 ## Run
 
 ```python
-from swin_unetr_mlx import segment
+from swin_unetr_mlx import run
 
-result = segment(image_path="ct.nii.gz", output_dir="out")
+result = run(image_path="ct.nii.gz", output_dir="out")
 print(result["outputs"]["mask"])
 ```
 
@@ -77,7 +77,7 @@ float32 label indices from the bundled
 | 5 | esophagus | 12 | right adrenal gland |
 | 6 | liver | 13 | left adrenal gland |
 
-`segment` returns `{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}`. The
+`run` returns `{"outputs": {"mask": path}, "artifacts": {"mask": ...}, "details": {...}}`. The
 mask artifact is a label map on the input grid with the 14 classes above; `details` holds the
 labels present, shapes, sliding-window settings, MLX device, peak memory and timings.
 
