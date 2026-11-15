@@ -22,7 +22,7 @@ _EXPORTS = {
     "run": "swin_unetr_mlx.medmlx",
 }
 
-__version__ = "0.2.7"
+__version__ = "0.3.0"
 __all__ = [
     "SwinUNETR",
     "forward_patch",
