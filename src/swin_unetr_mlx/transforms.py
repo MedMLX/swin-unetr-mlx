@@ -411,6 +411,20 @@ _CORNERS = (
 )
 
 
+def _depth_planes(data: Float32Array, index: Int64Array) -> Float32Array:
+    """``data.take(index, axis=1)`` without copying a non-contiguous ``data`` in full.
+
+    ``ndarray.take`` first makes its source C-contiguous. Logits cropped from a padded
+    sliding window (a volume shorter than the window on one axis) are a strided view,
+    so every chunk would copy the whole volume. Gathering from the chunk's own range
+    of planes copies only those planes.
+    """
+    if data.flags.c_contiguous:
+        return data.take(index, axis=1)
+    first = int(index.min())
+    return data[:, first : int(index.max()) + 1].take(index - first, axis=1)
+
+
 def _sample_separable(
     data: Float32Array,
     gx: Float64Array,
@@ -428,18 +442,24 @@ def _sample_separable(
         (None, None, slice(None)),
     )
     result = np.zeros((data.shape[0], len(gz), len(gy), len(gx)), dtype=np.float64)
-    # The eight corners use two z slabs and four (z, y) planes; gather each once.
-    slabs = [data.take(np.minimum(z_index[cz], depth - 1), axis=1) for cz in (0, 1)]
-    planes = [
-        [slab.take(np.minimum(y_index[cy], height - 1), axis=2) for cy in (0, 1)] for slab in slabs
+    term = np.empty_like(result)
+    # Gather each x column set on the source rows of its z slab so the y gather
+    # copies whole rows. The eight corners share four column sets.
+    slabs = [_depth_planes(data, np.minimum(z_index[cz], depth - 1)) for cz in (0, 1)]
+    columns = [
+        [slab.take(np.minimum(x_index[cx], width - 1), axis=3) for cx in (0, 1)] for slab in slabs
     ]
     for cz, cy, cx in _CORNERS:
         # (x * y) * z, left to right, as in grid_sampler_3d_cpu_impl.
         weight = (x_weight[cx][along_w] * y_weight[cy][along_h]) * z_weight[cz][along_d]
         zi, yi, xi = z_index[cz], y_index[cy], x_index[cx]
-        values = planes[cz][cy].take(np.minimum(xi, width - 1), axis=3).astype(np.float64)
+        values = columns[cz][cx].take(np.minimum(yi, height - 1), axis=2)
         inside = ((zi < depth)[along_d] & (yi < height)[along_h]) & (xi < width)[along_w]
-        result += np.where(inside, values * weight, 0.0)
+        # Float64 weights keep the product in float64. Excluded corners contribute +0.0.
+        np.multiply(values, weight, out=term)
+        if not inside.all():
+            np.copyto(term, 0.0, where=~inside)
+        result += term
     return result
 
 
