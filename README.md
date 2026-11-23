@@ -48,7 +48,7 @@ downloads them ahead of time. For local weights, pass the folder containing
 
 | Argument | Meaning |
 | --- | --- |
-| `image_path` | One 3D abdominal CT in NIfTI, in Hounsfield units |
+| `image_path` | One 3D abdominal CT in NIfTI-1 or NIfTI-2, in Hounsfield units, with an invertible affine |
 | `output_dir` | Directory for `mask.nii.gz`, created if needed |
 | `weights_path` | Optional folder containing `swinunetr.safetensors` |
 | `overwrite` | `False` by default; an existing mask is replaced only when `True` |
@@ -56,9 +56,9 @@ downloads them ahead of time. For local weights, pass the folder containing
 | `streaming` | `False` by default; `True` blends into temporary memory-mapped files instead of holding the logits in memory |
 | `scratch_dir` | Parent folder for the streaming maps; the system temporary folder by default |
 
-Voxels must be finite and representable in float32. ITK reads the image: it converts
-meters and microns to millimeters, assumes millimeters when units are unspecified,
-and interprets missing or disagreeing qform and sform headers.
+Voxels must be finite and representable in float32. Meter and micron headers are
+converted to millimeters, and unspecified units are read as millimeters. The image is
+rejected when its qform and sform headers make ITK and NiBabel disagree on the affine.
 
 ### Outputs
 
@@ -104,7 +104,8 @@ logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
   stitching. `SwinUNETR(weights, mx=mx)` runs on MLX arrays directly.
 - Both default to `merging_profile="monai-1.4"`, the released bundle's repeated
   patch-merging phases; pass `merging_profile="monai-1.6"` to compare with MONAI 1.6.
-- `load_network` checks names, shapes, dtypes, finite values and position-index ranges.
+- `load_network` checks names, shapes, dtypes, finite values and position-index ranges,
+  and raises `AssetNotReadyError` when the weights do not match.
 
 ## Use with MedMLX
 

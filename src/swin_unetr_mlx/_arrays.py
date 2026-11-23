@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-type HostArray = np.ndarray[tuple[int, ...], np.dtype[np.generic]]
 type Float32Array = np.ndarray[tuple[int, ...], np.dtype[np.float32]]
 type Float64Array = np.ndarray[tuple[int, ...], np.dtype[np.float64]]
 type Int64Array = np.ndarray[tuple[int, ...], np.dtype[np.int64]]

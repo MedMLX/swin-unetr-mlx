@@ -2,7 +2,8 @@
 
 The pinned upstream ``configs/inference.json`` defines preprocessing, sliding
 windows, inversion and output layout. MLX supplies the network arithmetic;
-NumPy and SimpleITK supply the volume transforms.
+``medmlx_core`` reads, admits and writes the NIfTI volumes; NumPy and SimpleITK
+supply the volume transforms.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import time
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from swin_unetr_mlx._arrays import Float32Array, Float64Array
 from swin_unetr_mlx._records import RunResult, Runtime
@@ -18,19 +19,23 @@ from swin_unetr_mlx._records import RunResult, Runtime
 if TYPE_CHECKING:
     from medmlx_core.volume_workspace import VolumeWorkspace
 
-    from swin_unetr_mlx._types import CoreSlidingWindow
     from swin_unetr_mlx.network import SwinUNETR
 
 import numpy as np
-from medmlx_core.errors import AssetNotReadyError, InvalidInputError, ModelExecutionError
+from medmlx_core.errors import InvalidInputError, ModelExecutionError
 from medmlx_core.files import input_file, output_targets, publish
 from medmlx_core.outputs import artifact
-from medmlx_core.weights import model_folder, weights_revision
+from medmlx_core.transforms import axis_codes, orient, scale_intensity_range
+from medmlx_core.volumes import read_volume, write_volume
+from medmlx_core.weights import weights_file, weights_revision
 
 from swin_unetr_mlx import transforms
 from swin_unetr_mlx.specification import bundle_config
+from swin_unetr_mlx.weights import load_network
 
 CONFIG = bundle_config()
+# Source affine for ``Orientation.inverse``, resampling record, resampled affine.
+type Inverse = tuple[Float64Array, transforms.Resampling, Float64Array]
 BUNDLE = CONFIG.name
 LABELS = dict(enumerate(CONFIG.labels))
 
@@ -62,14 +67,14 @@ def run(
 ) -> RunResult:
     """Segment abdominal organs in one CT volume and write the label map.
 
-    ``image_path`` is expected to be a 3D CT NIfTI in Hounsfield units; both
-    NiBabel and ITK must read it, but the runner does not explicitly check its
-    format. Omit ``weights_path`` to download and reuse ``MedMLX/swin-unetr-mlx``.
+    ``image_path`` is expected to be a 3D CT NIfTI-1 or NIfTI-2 in Hounsfield units,
+    admitted by ``medmlx_core.volumes.read_volume`` and readable by ITK. Omit
+    ``weights_path`` to download and reuse ``MedMLX/swin-unetr-mlx``.
     An explicit model folder contains ``swinunetr.safetensors``.
     Writes ``mask.nii.gz`` in ``output_dir``, with the input shape and ITK reader's
     affine, and float32 labels 0-13 as ``SaveImaged`` does. An existing mask is
     replaced only when ``overwrite`` is true (default false).
-    The image is rejected unless NiBabel's affine, converted to millimetres, matches
+    The image is rejected unless NiBabel's affine, converted to millimeters, matches
     the ITK affine, so conflicting qform/sform geometry never selects a reader's choice.
 
     Args:
@@ -92,8 +97,8 @@ def run(
 
     Raises:
         InvalidInputError: ``overwrite`` is not a bool, the output exists without
-            ``overwrite``, or the image is missing, not a finite 3D NIfTI with positive
-            spacing, or reads with different shapes or affines through ITK and nibabel.
+            ``overwrite``, the image is rejected by ``read_volume``, or it reads with
+            different shapes or affines through ITK and nibabel.
         AssetNotReadyError: ``weights_path`` is not a folder, or its
             ``swinunetr.safetensors`` is missing or does not match the pinned graph.
         ModelExecutionError: Inference failed or the mask is off the source grid or has
@@ -111,9 +116,10 @@ def run(
     mask_path = output_targets(
         output_dir, {"mask": OUTPUT_NAME}, overwrite=overwrite, inputs=[image_file]
     )["mask"]
-    weights = _weights_file(model_folder("swin-unetr", weights_path) / "swinunetr.safetensors")
+    weights = weights_file("swin-unetr", weights_path, "swinunetr.safetensors")
     started = time.perf_counter()
-    data, nibabel_affine = _validate_volume(image_file, "image_path")
+    volume = read_volume(image_file)
+    data = volume.data
     shape = (int(data.shape[0]), int(data.shape[1]), int(data.shape[2]))
     try:
         reader_shape, reader_affine = transforms.read_itk_geometry(image_file)
@@ -123,8 +129,8 @@ def run(
         raise InvalidInputError(
             f"image_path reads as {reader_shape} through ITK but {shape} through nibabel"
         )
-    _validate_geometry(reader_affine, nibabel_affine, "image_path")
-    network = _load_network(weights)
+    _validate_geometry(reader_affine, volume.affine, "image_path")
+    network = load_network(weights)
     loaded = time.perf_counter()
     image, inverse = preprocess(data, reader_affine)
     prepared = time.perf_counter()
@@ -146,8 +152,8 @@ def run(
         del probabilities
     _validate_mask(mask, shape)
     publish({
-        mask_path: lambda partial: transforms.write_nifti(
-            partial, mask, reader_affine, CONFIG.output_dtype
+        mask_path: lambda partial: write_volume(
+            partial, mask, reader_affine, dtype=np.dtype(CONFIG.output_dtype).type
         )
     })
     finished = time.perf_counter()
@@ -192,25 +198,27 @@ def run(
 def preprocess(
     data: Float32Array,
     affine: Float64Array,
-) -> tuple[Float32Array, tuple[transforms.Orientation, transforms.Resampling, Float64Array]]:
+) -> tuple[Float32Array, Inverse]:
     """``EnsureChannelFirstd`` through ``EnsureTyped``: RAS, 1.5 x 1.5 x 2 mm, [0, 1].
 
     ``data`` is the float32 CT in HU, ``(X, Y, Z)`` as read by ``transforms.read_itk``,
     with its RAS ``affine``. It is reoriented to RAS, resampled to the bundle's spacing
     (mm), then clipped to -175..250 HU and scaled to [0, 1]. Returns the
-    ``(1, 1, *spatial)`` float32 network input and the record ``Invertd`` reverses.
+    ``(1, 1, *spatial)`` float32 network input and the record ``Invertd`` reverses:
+    the source affine ``Orientation`` restores, the resampling record and the resampled
+    affine.
     """
-    oriented, oriented_affine, orientation = transforms.orient(data[None], affine, CONFIG.axcodes)
+    oriented, oriented_affine = orient(data[None], affine, CONFIG.axcodes)
     resampled, resampled_affine, resampling = transforms.spacing(
         oriented, oriented_affine, CONFIG.pixdim
     )
-    image = transforms.scale_intensity_range(resampled, *CONFIG.intensity)
-    return image[None], (orientation, resampling, resampled_affine)
+    image = scale_intensity_range(resampled, *CONFIG.intensity)
+    return image[None], (np.array(affine, dtype=np.float64), resampling, resampled_affine)
 
 
 def postprocess(
     logits: Float32Array,
-    inverse: tuple[transforms.Orientation, transforms.Resampling, Float64Array],
+    inverse: Inverse,
 ) -> Float32Array:
     """Softmax, ``Invertd`` (resampling then reorientation), argmax; float32 labels.
 
@@ -223,80 +231,20 @@ def postprocess(
 
 def _restore(
     probabilities: Float32Array,
-    inverse: tuple[transforms.Orientation, transforms.Resampling, Float64Array],
+    inverse: Inverse,
 ) -> Float32Array:
     """Resample, argmax, then reorient: ``postprocess`` after its softmax.
 
     Argmax runs per resampling chunk, and reorientation, a spatial flip/transpose
     that leaves the channel axis alone, then moves one label channel instead of 14.
     """
-    orientation, resampling, affine = inverse
+    source_affine, resampling, affine = inverse
     labels, restored = transforms.invert_spacing(
         probabilities, affine, resampling, channel_argmax=True
     )
-    labels, _ = transforms.invert_orientation(labels, restored, orientation)
+    # ``Orientation.inverse`` reorients to the axis codes of the recorded source affine.
+    labels, _ = orient(labels, restored, axis_codes(source_affine))
     return labels[0]
-
-
-def _weights_file(weights_path: Path) -> Path:
-    """Require an existing ``.safetensors`` file, keeping symlinked cache names intact."""
-    # Preserve the named Hub-cache symlink: its underlying blob has no extension,
-    # while MLX determines the tensor format from the supplied filename.
-    path = Path(weights_path).expanduser().absolute()
-    hint = (
-        "Download swinunetr.safetensors from MedMLX/swin-unetr-mlx on Hugging Face."
-    )
-    if not path.is_file():
-        raise AssetNotReadyError(
-            f"SwinUNETR weights not found: {path}", reason=f"missing {path}", hint=hint
-        )
-    if path.suffix != ".safetensors":
-        raise AssetNotReadyError(
-            f"SwinUNETR weights must be converted MLX safetensors, got {path.name}",
-            reason=f"unconverted {path.name}",
-            hint=hint,
-        )
-    return path
-
-
-def _validate_volume(path: Path, role: str) -> tuple[Float32Array, Float64Array]:
-    """Admit a real, finite float32-range 3D NIfTI with valid spatial units.
-
-    Return admitted pixels and NiBabel's RAS affine in millimetres. Source values
-    are checked before FP32 conversion, retaining fractional/range/nonfinite
-    admission. ITK independently reads only geometry: its pixel reader replaces
-    stored NaNs with zero and cannot own the source-value check.
-    """
-    from swin_unetr_mlx._nifti import ImageFileError, nib
-
-    try:
-        image = nib.load(path.as_posix())
-    except (OSError, ImageFileError) as error:
-        raise InvalidInputError(f"Invalid {role} NIfTI: {path}") from error
-    # NIfTI stores the spatial unit in the low three bits; SimpleITK otherwise
-    # silently treats unrecognized unit codes as millimetres.
-    if (int(image.header["xyzt_units"]) & 0x07) not in (0, 1, 2, 3):
-        raise InvalidInputError(f"{role} has invalid NIfTI spatial units")
-    raw = np.asanyarray(image.dataobj)
-    if raw.ndim != 3:
-        raise InvalidInputError(f"{role} must be a 3D NIfTI; got shape {tuple(raw.shape)}")
-    if np.iscomplexobj(raw):
-        raise InvalidInputError(f"{role} must contain real-valued voxels")
-    if not np.all(np.isfinite(raw)):
-        raise InvalidInputError(f"{role} contains non-finite voxels")
-    limit = np.finfo(np.float32).max
-    if np.any(raw > limit) or np.any(raw < -limit):
-        raise InvalidInputError(f"{role} contains voxels outside the finite float32 range")
-    affine = np.asarray(image.affine, dtype=np.float64)
-    if affine.shape != (4, 4) or not np.all(np.isfinite(affine)):
-        raise InvalidInputError(f"{role} affine must be a finite 4x4 matrix")
-    zooms = np.asarray(image.header.get_zooms()[:3], dtype=np.float64)
-    if not np.all(np.isfinite(zooms)) or np.any(zooms <= 0.0):
-        raise InvalidInputError(f"{role} voxel spacing values must be finite and positive")
-    # NIfTI unit codes 1-3 are metre, millimetre, micron; 0 (unknown) reads as mm.
-    millimetres = {0: 1.0, 1: 1000.0, 2: 1.0, 3: 0.001}[int(image.header["xyzt_units"]) & 0x07]
-    affine = affine * np.array([[millimetres], [millimetres], [millimetres], [1.0]])
-    return np.asarray(raw, dtype=np.float32), affine
 
 
 def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, role: str) -> None:
@@ -317,21 +265,6 @@ def _validate_geometry(itk_affine: Float64Array, nibabel_affine: Float64Array, r
         )
 
 
-def _load_network(weights: Path) -> SwinUNETR:
-    """Load the checkpoint, reporting any layout mismatch as ``AssetNotReadyError``."""
-
-    from swin_unetr_mlx.weights import load_network
-
-    try:
-        return load_network(weights)
-    except (InvalidInputError, ValueError, RuntimeError) as error:
-        raise AssetNotReadyError(
-            f"SwinUNETR weights {weights} do not match the pinned graph: {error}",
-            reason=f"mismatched {weights.name}",
-            hint="Download swinunetr.safetensors from MedMLX/swin-unetr-mlx on Hugging Face.",
-        ) from error
-
-
 def _predict(
     network: SwinUNETR, image: Float32Array, *, sw_batch_size: int = CONFIG.sw_batch_size,
     workspace: VolumeWorkspace | None = None,
@@ -341,9 +274,7 @@ def _predict(
     ``image`` is the preprocessed ``(1, 1, *spatial)`` array. Returns float32 logits
     ``(1, 14, *spatial)`` and the MLX device and peak memory in bytes.
     """
-    import medmlx_core.sliding_window as core_window
-
-    sliding_window_inference = cast("CoreSlidingWindow", core_window).sliding_window_inference
+    from medmlx_core.sliding_window import sliding_window_inference
 
     mx = network.mx
     mx.reset_peak_memory()

@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX
+    from medmlx_core.typing import MlxRuntime
 
 
 import numpy as np
 from fixture_contracts import NetworkMetadata
-from medmlx_core.typing import ArrayFactory
 from real_inputs import network_input
 from reference_data import ReferenceRecording, recording, seeded_native_weights
 
@@ -54,14 +53,14 @@ def _assert_network_reference(actual: Float32Array, reference: ReferenceRecordin
     )
 
 
-def test_seeded_network_matches_upstream(tmp_path: Path, mx: MLX) -> None:
+def test_seeded_network_matches_upstream(tmp_path: Path, mx: MlxRuntime) -> None:
     """Compare seeded native network outputs with the pinned source recording."""
     reference = recording("network")
     meta = cast(NetworkMetadata, reference.metadata)
     weights = seeded_native_weights(meta["weights_seed"])
     path = tmp_path / "network.safetensors"
     mx.save_safetensors(
-        str(path), {key: cast(ArrayFactory, mx.array)(value) for key, value in weights.items()}
+        str(path), {key: mx.array(value) for key, value in weights.items()}
     )
     network = load_network(path)
     values = network_input()

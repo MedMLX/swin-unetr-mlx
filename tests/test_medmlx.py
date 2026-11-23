@@ -5,6 +5,7 @@ The parity fixture records pinned upstream MONAI 1.4 transforms on HCC-TACE CT.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -14,15 +15,14 @@ import pytest
 from fixture_contracts import RunnerMetadata
 from medmlx_core.errors import AssetNotReadyError, InvalidInputError
 from medmlx_core.outputs import validate_outputs
-from medmlx_core.typing import ArrayFactory
+from medmlx_core.volumes import read_volume, write_like, write_volume
 from reference_data import recording, seeded_native_weights
 
 from swin_unetr_mlx import medmlx, transforms
-from swin_unetr_mlx._nifti import nib
 from swin_unetr_mlx.medmlx import run
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX
+    from medmlx_core.typing import MlxRuntime
 
 CASES = ("axis", "flipped", "oblique")
 
@@ -58,14 +58,16 @@ def test_transforms_match_the_bundle(tmp_path: Path, case: str) -> None:
 
 
 @pytest.mark.parametrize("batch_size,streaming", [(4, False), (1, True), (2, True)])
-def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streaming: bool) -> None:
+def test_run_matches_upstream(
+    tmp_path: Path, mx: MlxRuntime, batch_size: int, streaming: bool
+) -> None:
     """One 96^3 window of the released graph with seeded weights matches the upstream mask."""
     source = tmp_path / "ct.nii.gz"
     reference = recording("runner")
     source.write_bytes(reference.arrays["image_nifti"].tobytes())
     saved = cast(RunnerMetadata, reference.metadata)["saved"]
     folder, blob = tmp_path / "model", tmp_path / "cached-blob"
-    native = {k: cast(ArrayFactory, mx.array)(v) for k, v in seeded_native_weights(3).items()}
+    native = {k: mx.array(v) for k, v in seeded_native_weights(3).items()}
     mx.save_safetensors(str(tmp_path / "weights.safetensors"), native)
     # Match a Hugging Face snapshot link to an extensionless cache blob.
     (tmp_path / "weights.safetensors").rename(blob)
@@ -87,8 +89,8 @@ def test_run_matches_upstream(tmp_path: Path, mx: MLX, batch_size: int, streamin
     assert mask_artifact.get("labels") == [
         {"value": value, "name": name} for value, name in medmlx.LABELS.items()
     ]
-    written = nib.load(result["outputs"]["mask"])
-    data = np.asanyarray(written.dataobj)
+    written = read_volume(result["outputs"]["mask"], dtype=None)
+    data = written.data
     assert np.array_equal(written.affine, np.array(saved["affine"]))
     assert data.dtype == np.float32
     assert np.array_equal(data, reference.arrays["mask"]), "Saved mask differs from upstream"
@@ -168,24 +170,25 @@ def test_run_requires_reader_geometry_agreement(
     runner writes equals NiBabel's affine in millimetres.
     """
     sform, sform_code, qform, qform_code, units, millimetres, accepted = GEOMETRIES[case]
-    data = np.asanyarray(nib.load(_image(tmp_path, "axis")).dataobj)
-    image = nib.Nifti1Image(data, sform)
-    image.header.set_xyzt_units(units)
-    image.set_sform(sform, sform_code)
-    image.set_qform(qform, qform_code)
+    source = read_volume(_image(tmp_path, "axis"), dtype=None)
+    data = source.data
+    header = source.header.copy()
+    header.set_xyzt_units(units)
+    header.set_sform(sform, sform_code)
+    header.set_qform(qform, qform_code)
     path = tmp_path / f"{case}.nii.gz"
-    nib.save(image, path)
+    write_like(path, data, replace(source, header=header), dtype=data.dtype.type)
     weights = tmp_path / "model" / "swinunetr.safetensors"
     weights.parent.mkdir()
     weights.write_bytes(b"placeholder")
-    monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
+    monkeypatch.setattr(medmlx, "load_network", _reject_weights)
     error = AssetNotReadyError if accepted else InvalidInputError
     with pytest.raises(error) as raised:
         run(image_path=str(path), weights_path=str(weights.parent), output_dir=str(tmp_path))
     if not accepted:
         assert "conflicting NIfTI geometry" in str(raised.value)
         return
-    reference = nib.load(path).affine * np.r_[[millimetres] * 3, 1.0][:, None]
+    reference = sform * np.r_[[millimetres] * 3, 1.0][:, None]
     np.testing.assert_allclose(transforms.read_itk(path)[1], reference, rtol=1e-6, atol=1e-3)
     header_shape, header_affine = transforms.read_itk_geometry(path)
     assert header_shape == data.shape
@@ -204,8 +207,8 @@ def test_runner_rejects_invalid_source_values_before_any_reader_cast(
     source = tmp_path / "source.nii.gz"
     data = np.zeros((4, 5, 6), dtype=np.float64)
     data[1, 2, 3] = bad_value
-    nib.save(nib.Nifti1Image(data, np.eye(4)), source)
+    write_volume(source, data, np.eye(4), dtype=np.float64)
     (tmp_path / "swinunetr.safetensors").write_bytes(b"placeholder")
-    monkeypatch.setattr(medmlx, "_load_network", _reject_weights)
-    with pytest.raises(InvalidInputError, match=r"non-finite|finite float32 range"):
+    monkeypatch.setattr(medmlx, "load_network", _reject_weights)
+    with pytest.raises(InvalidInputError, match=r"non-finite|float32 range"):
         run(image_path=str(source), weights_path=str(tmp_path), output_dir=str(tmp_path / "out"))

@@ -1,11 +1,12 @@
-"""NumPy ports of the MONAI 1.4 transforms in the pinned SwinUNETR BTCV bundle.
+"""NumPy ports of the MONAI 1.4 reader and resampling in the pinned SwinUNETR BTCV bundle.
 
 The bundle's ``configs/inference.json`` (revision e3e994c, pinned in
 ``specification.json``) reads CT with ``ITKReader``, reorients to RAS, resamples to
 1.5 x 1.5 x 2.0 mm, scales -175..250 HU to [0, 1], and after the network applies
-softmax, inverts the resampling and reorientation, and takes the argmax. These
-functions reproduce those transforms without Torch or MONAI. ITK's NIfTI reader is
-used through SimpleITK. Spatial resampling follows MONAI's ``AffineTransform`` path,
+softmax, inverts the resampling and reorientation, and takes the argmax. Orientation,
+intensity scaling and argmax come from ``medmlx_core.transforms``; this module keeps
+the ITK read, the resampling and the softmax. ITK's NIfTI reader is used through
+SimpleITK. Spatial resampling follows MONAI's ``AffineTransform`` path,
 ``torch.nn.functional.affine_grid`` and trilinear ``grid_sample`` with border
 padding and ``align_corners=False``, computed in float64 as ``Spacing`` does and
 returned as float32.
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import numpy.typing as npt
+from medmlx_core import transforms as core_transforms
 from medmlx_core.geometry import (
     _bmm,
     _linspace_from_neg_one,
@@ -32,26 +33,17 @@ from medmlx_core.geometry import (
     zoom_affine,
 )
 
-from swin_unetr_mlx._arrays import Float32Array, Float64Array, HostArray, Int64Array
-from swin_unetr_mlx._nifti import nib
+from swin_unetr_mlx._arrays import Float32Array, Float64Array, Int64Array
 
 if TYPE_CHECKING:
     from swin_unetr_mlx._sitk import Image
 
 # monai.data.utils.AFFINE_TOL
 AFFINE_TOL = 1e-3
-_LABELS = (("L", "R"), ("P", "A"), ("I", "S"))
 # Bound the float64 corner arrays of one resampling chunk.
 _CHUNK_VOXELS = 1 << 20
 # Resampling chunks run concurrently; each holds about ten chunk-sized arrays.
 _RESAMPLE_THREADS = min(8, os.cpu_count() or 1)
-
-
-@dataclass(frozen=True, slots=True)
-class Orientation:
-    """What ``Orientation`` records for its inverse: the affine it started from."""
-
-    original_affine: Float64Array
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,44 +86,6 @@ def _itk_affine(image: Image) -> Float64Array:
     affine[:3, :3] = direction @ np.diag(spacing)
     affine[:3, -1] = origin
     return np.diag([-1, -1, 1, 1]).astype(affine.dtype) @ affine
-
-
-def orient(
-    data: Float32Array,
-    affine: Float64Array,
-    axcodes: str,
-) -> tuple[Float32Array, Float64Array, Orientation]:
-    """``Orientation(axcodes)`` on channel-first data; returns data, new affine, inverse."""
-    rank = data.ndim - 1
-    affine_np = np.array(affine, dtype=np.float64, copy=True)
-    affine_ = to_affine_nd(rank, affine_np)
-    source = nib.io_orientation(affine_)
-    target = nib.orientations.axcodes2ornt(axcodes[:rank], labels=_LABELS)
-    spatial_ornt = nib.orientations.ornt_transform(source, target)
-    xform = nib.orientations.inv_ornt_aff(spatial_ornt, data.shape[1:])
-    spatial_ornt[:, 0] += 1
-    spatial_ornt = np.concatenate([np.array([[0, 1]]), spatial_ornt])
-    axes = [axis for axis, flip in enumerate(spatial_ornt[:, 1]) if flip == -1]
-    full_transpose = np.arange(data.ndim)
-    full_transpose[: len(spatial_ornt)] = np.argsort(spatial_ornt[:, 0])
-    result = np.flip(data, tuple(axes)) if axes else data
-    if not np.all(full_transpose == np.arange(data.ndim)):
-        result = result.transpose(full_transpose)
-    new_affine = _mm(affine_np, to_affine_nd(len(affine_np) - 1, xform))
-    return np.ascontiguousarray(result), new_affine, Orientation(affine_np)
-
-
-def invert_orientation(
-    data: Float32Array,
-    affine: Float64Array,
-    record: Orientation,
-) -> tuple[Float32Array, Float64Array]:
-    """``Orientation.inverse``: reorient to the recorded original axis codes."""
-    axcodes = "".join(
-        cast(tuple[str, ...], nib.orientations.aff2axcodes(record.original_affine, labels=_LABELS))
-    )
-    result, new_affine, _ = orient(data, affine, axcodes)
-    return result, new_affine
 
 
 def spacing(
@@ -201,25 +155,12 @@ def spatial_resample(
         np.allclose(xform, np.eye(len(xform)), atol=AFFINE_TOL) and same_size
     )
     if unchanged:
-        values = argmax(data) if channel_argmax else data.astype(np.float32)
+        values = core_transforms.channel_argmax(data) if channel_argmax else data.astype(np.float32)
         return values, np.array(src_affine, dtype=np.float64), record
     values = _grid_sample(data, xform, in_size, size, channel_argmax=channel_argmax)
     affine = np.array(src_affine, dtype=np.float64)
     new_affine = _mm(affine, to_affine_nd(len(affine) - 1, xform))
     return values, new_affine, record
-
-
-def scale_intensity_range(
-    data: Float32Array,
-    a_min: float,
-    a_max: float,
-    b_min: float,
-    b_max: float,
-) -> Float32Array:
-    """``ScaleIntensityRange(..., clip=True)`` in float32."""
-    result = (data - np.float32(a_min)) / np.float32(a_max - a_min)
-    result = result * np.float32(b_max - b_min) + np.float32(b_min)
-    return np.clip(result, np.float32(b_min), np.float32(b_max)).astype(np.float32, copy=False)
 
 
 def softmax(data: Float32Array, *, out: Float32Array | None = None) -> Float32Array:
@@ -236,26 +177,6 @@ def softmax(data: Float32Array, *, out: Float32Array | None = None) -> Float32Ar
     for channel in shifted[1:]:
         total += channel
     return np.divide(shifted, total, out=shifted)
-
-
-def argmax(data: Float32Array) -> Float32Array:
-    """``AsDiscrete(argmax=True)``: the first maximal channel, as float32 ``(1, ...)``."""
-    return np.argmax(data, axis=0)[None].astype(np.float32)
-
-
-def write_nifti(path: Path, data: HostArray, affine: Float64Array, dtype: npt.DTypeLike) -> None:
-    """Cast and write a millimetre NIfTI with sform and qform code 1.
-
-    The sform stores the affine within NIfTI precision. The qform cannot
-    represent shear, which NiBabel removes when encoding that form.
-    """
-    array = np.asarray(data).astype(dtype, copy=False)
-    matrix = to_affine_nd(3, affine)
-    image = nib.Nifti1Image(array, matrix)
-    image.header.set_xyzt_units("mm")
-    image.set_sform(matrix, code=1)
-    image.set_qform(matrix, code=1)
-    nib.save(image, str(path))
 
 
 def _normalize_transform(shape: Sequence[int]) -> Float64Array:
@@ -339,7 +260,9 @@ def _grid_sample(
             values = _sample(data, *coordinates)
         # Round to float32 first, as storing the full resampled volume would.
         rounded = values.astype(np.float32)
-        result[:, start:stop] = argmax(rounded) if channel_argmax else rounded
+        result[:, start:stop] = (
+            core_transforms.channel_argmax(rounded) if channel_argmax else rounded
+        )
 
     # Chunks write disjoint output planes and NumPy releases the GIL in their
     # gathers and arithmetic, so threads change only the elapsed time.
@@ -411,6 +334,20 @@ _CORNERS = (
 )
 
 
+def _depth_planes(data: Float32Array, index: Int64Array) -> Float32Array:
+    """``data.take(index, axis=1)`` without copying a non-contiguous ``data`` in full.
+
+    ``ndarray.take`` first makes its source C-contiguous. Logits cropped from a padded
+    sliding window (a volume shorter than the window on one axis) are a strided view,
+    so every chunk would copy the whole volume. Gathering from the chunk's own range
+    of planes copies only those planes.
+    """
+    if data.flags.c_contiguous:
+        return data.take(index, axis=1)
+    first = int(index.min())
+    return data[:, first : int(index.max()) + 1].take(index - first, axis=1)
+
+
 def _sample_separable(
     data: Float32Array,
     gx: Float64Array,
@@ -428,18 +365,24 @@ def _sample_separable(
         (None, None, slice(None)),
     )
     result = np.zeros((data.shape[0], len(gz), len(gy), len(gx)), dtype=np.float64)
-    # The eight corners use two z slabs and four (z, y) planes; gather each once.
-    slabs = [data.take(np.minimum(z_index[cz], depth - 1), axis=1) for cz in (0, 1)]
-    planes = [
-        [slab.take(np.minimum(y_index[cy], height - 1), axis=2) for cy in (0, 1)] for slab in slabs
+    term = np.empty_like(result)
+    # Gather each x column set on the source rows of its z slab so the y gather
+    # copies whole rows. The eight corners share four column sets.
+    slabs = [_depth_planes(data, np.minimum(z_index[cz], depth - 1)) for cz in (0, 1)]
+    columns = [
+        [slab.take(np.minimum(x_index[cx], width - 1), axis=3) for cx in (0, 1)] for slab in slabs
     ]
     for cz, cy, cx in _CORNERS:
         # (x * y) * z, left to right, as in grid_sampler_3d_cpu_impl.
         weight = (x_weight[cx][along_w] * y_weight[cy][along_h]) * z_weight[cz][along_d]
         zi, yi, xi = z_index[cz], y_index[cy], x_index[cx]
-        values = planes[cz][cy].take(np.minimum(xi, width - 1), axis=3).astype(np.float64)
+        values = columns[cz][cx].take(np.minimum(yi, height - 1), axis=2)
         inside = ((zi < depth)[along_d] & (yi < height)[along_h]) & (xi < width)[along_w]
-        result += np.where(inside, values * weight, 0.0)
+        # Float64 weights keep the product in float64. Excluded corners contribute +0.0.
+        np.multiply(values, weight, out=term)
+        if not inside.all():
+            np.copyto(term, 0.0, where=~inside)
+        result += term
     return result
 
 
