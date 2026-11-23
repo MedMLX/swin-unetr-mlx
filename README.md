@@ -40,10 +40,9 @@ result = run(image_path="ct.nii.gz", output_dir="out")
 print(result["outputs"]["mask"])
 ```
 
-Omitting `weights_path` downloads `MedMLX/swin-unetr-mlx` into the shared MedMLX cache
-on first use; with MedMLX installed, `medmlx setup swin-unetr` downloads it ahead of
-time. To use your own copy, pass the folder containing `swinunetr.safetensors` as
-`weights_path`.
+Weights download from `MedMLX/swin-unetr-mlx` on first use; `medmlx setup swin-unetr`
+downloads them ahead of time. For local weights, pass the folder containing
+`swinunetr.safetensors` as `weights_path`.
 
 ### Inputs
 
@@ -54,11 +53,11 @@ time. To use your own copy, pass the folder containing `swinunetr.safetensors` a
 | `weights_path` | Optional folder containing `swinunetr.safetensors` |
 | `overwrite` | `False` by default; an existing mask is replaced only when `True` |
 | `sw_batch_size` | Windows per network call, 4 by default |
-| `streaming` | Blend into temporary memory-mapped logits instead of a resident volume |
+| `streaming` | `False` by default; `True` blends into temporary memory-mapped files instead of holding the logits in memory |
 | `scratch_dir` | Parent folder for the streaming maps; the system temporary folder by default |
 
 Voxels must be finite and representable in float32. ITK reads the image: it converts
-metres and microns to millimetres, assumes millimetres when units are unspecified,
+meters and microns to millimeters, assumes millimeters when units are unspecified,
 and interprets missing or disagreeing qform and sform headers.
 
 ### Outputs
@@ -88,7 +87,6 @@ labels present, shapes, sliding-window settings, MLX device, peak memory and tim
 | `ModelExecutionError` | Inference fails |
 | `MissingDependencyError` | The host is unsupported or Metal is unavailable |
 
-
 ### Python API
 
 ```python
@@ -107,7 +105,6 @@ logits = forward_patch(network, np.zeros((1, 1, 96, 96, 96), dtype=np.float32))
 - Both default to `merging_profile="monai-1.4"`, the released bundle's repeated
   patch-merging phases; pass `merging_profile="monai-1.6"` to compare with MONAI 1.6.
 - `load_network` checks names, shapes, dtypes, finite values and position-index ranges.
-- Inference requires Apple Silicon with Metal.
 
 ## Use with MedMLX
 
