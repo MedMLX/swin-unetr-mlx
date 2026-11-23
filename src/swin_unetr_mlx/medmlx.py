@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from swin_unetr_mlx._arrays import Float32Array, Float64Array
 from swin_unetr_mlx._records import RunResult, Runtime
@@ -18,7 +18,6 @@ from swin_unetr_mlx._records import RunResult, Runtime
 if TYPE_CHECKING:
     from medmlx_core.volume_workspace import VolumeWorkspace
 
-    from swin_unetr_mlx._types import CoreSlidingWindow
     from swin_unetr_mlx.network import SwinUNETR
 
 import numpy as np
@@ -341,9 +340,7 @@ def _predict(
     ``image`` is the preprocessed ``(1, 1, *spatial)`` array. Returns float32 logits
     ``(1, 14, *spatial)`` and the MLX device and peak memory in bytes.
     """
-    import medmlx_core.sliding_window as core_window
-
-    sliding_window_inference = cast("CoreSlidingWindow", core_window).sliding_window_inference
+    from medmlx_core.sliding_window import sliding_window_inference
 
     mx = network.mx
     mx.reset_peak_memory()

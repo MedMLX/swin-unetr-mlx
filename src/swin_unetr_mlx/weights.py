@@ -8,9 +8,9 @@ from typing import cast
 
 import numpy as np
 from medmlx_core.errors import InvalidInputError
-from medmlx_core.typing import ArrayFactory
+from medmlx_core.typing import ArrayFactory, HostArray
 
-from swin_unetr_mlx._arrays import HostArray, NumericArray
+from swin_unetr_mlx._arrays import NumericArray
 from swin_unetr_mlx.network import MergingProfile, SwinUNETR
 from swin_unetr_mlx.runtime import import_mlx
 from swin_unetr_mlx.specification import specification

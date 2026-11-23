@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from swin_unetr_mlx._arrays import Float32Array, HostArray
+from swin_unetr_mlx._arrays import Float32Array
 
 if TYPE_CHECKING:
     from swin_unetr_mlx.network import SwinUNETR
 from medmlx_core.errors import InvalidInputError
-from medmlx_core.typing import ArrayFactory
+from medmlx_core.typing import ArrayFactory, HostArray
 
 
 def forward_patch(network: SwinUNETR, values: HostArray) -> Float32Array:

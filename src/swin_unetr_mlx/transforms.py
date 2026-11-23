@@ -31,8 +31,9 @@ from medmlx_core.geometry import (
     to_affine_nd,
     zoom_affine,
 )
+from medmlx_core.typing import HostArray
 
-from swin_unetr_mlx._arrays import Float32Array, Float64Array, HostArray, Int64Array
+from swin_unetr_mlx._arrays import Float32Array, Float64Array, Int64Array
 from swin_unetr_mlx._nifti import nib
 
 if TYPE_CHECKING:

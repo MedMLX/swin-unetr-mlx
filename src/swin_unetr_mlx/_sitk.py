@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Protocol, cast
 
 import SimpleITK
-
-from swin_unetr_mlx._arrays import HostArray
+from medmlx_core.typing import HostArray
 
 
 class Image(Protocol):
