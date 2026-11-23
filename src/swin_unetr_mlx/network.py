@@ -5,15 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from itertools import product
 from math import prod
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX, Array
+    from medmlx_core.typing import MlxRuntime
+
+    from swin_unetr_mlx._types import Array
 
 import numpy as np
 from medmlx_core.channel_last import ChannelLastGraph
 from medmlx_core.errors import InvalidInputError
-from medmlx_core.typing import ArrayFactory
 
 from swin_unetr_mlx.runtime import require_metal
 
@@ -36,14 +37,14 @@ class SwinUNETR(ChannelLastGraph):
     ``ValueError`` for a wrongly shaped or non-float32 input.
     """
 
-    mx: MLX
+    mx: MlxRuntime
     w: Mapping[str, Array]
 
     def __init__(
         self,
         weights: Mapping[str, Array],
         *,
-        mx: MLX,
+        mx: MlxRuntime,
         merging_profile: MergingProfile = "monai-1.4",
     ) -> None:
         """Initialize the native network with weights and a supported merging profile."""
@@ -138,7 +139,7 @@ class SwinUNETR(ChannelLastGraph):
         ]
         for i, region in enumerate(product(*slices)):
             values[(slice(None), *region, slice(None))] = i
-        values = self.partition(cast(ArrayFactory, self.mx.array)(values), window)[..., 0]
+        values = self.partition(self.mx.array(values), window)[..., 0]
         mask = self.mx.where(values[:, None, :] == values[:, :, None], 0.0, -100.0)
         self._attention_masks[key] = mask
         return mask
@@ -198,12 +199,12 @@ class SwinUNETR(ChannelLastGraph):
         shape = tuple(y.shape)
         mask = None
         if any(shift):
-            y = mx.roll(y, tuple(-s for s in shift), axis=(1, 2, 3))
+            y = mx.roll(y, tuple(-s for s in shift), (1, 2, 3))
             mask = self.mask(shape[1:4], window, shift)
         y = self.attention(self.partition(y, window), f"{name}.attn", heads, mask)
         y = self.reverse(y, window, shape)
         if any(shift):
-            y = mx.roll(y, shift, axis=(1, 2, 3))
+            y = mx.roll(y, shift, (1, 2, 3))
         x = x + y[:, : spatial[0], : spatial[1], : spatial[2], :]
         y = self.linear(self.layer_norm(x, f"{name}.norm2"), f"{name}.mlp.linear1")
         y = 0.5 * y * (1 + mx.erf(y * (2**-0.5)))  # exact (erf) GELU, as torch.nn.GELU

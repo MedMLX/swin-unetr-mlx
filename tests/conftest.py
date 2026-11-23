@@ -7,13 +7,13 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX
+    from medmlx_core.typing import MlxRuntime
 
 import pytest
 
 
 @pytest.fixture(scope="session")
-def mx() -> MLX:
+def mx() -> MlxRuntime:
     """Probe and load the Apple Silicon Metal runtime for native tests."""
     try:
         probe = subprocess.run(

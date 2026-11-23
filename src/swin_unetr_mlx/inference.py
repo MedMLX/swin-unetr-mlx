@@ -11,7 +11,7 @@ from swin_unetr_mlx._arrays import Float32Array
 if TYPE_CHECKING:
     from swin_unetr_mlx.network import SwinUNETR
 from medmlx_core.errors import InvalidInputError
-from medmlx_core.typing import ArrayFactory, HostArray
+from medmlx_core.typing import HostArray
 
 
 def forward_patch(network: SwinUNETR, values: HostArray) -> Float32Array:
@@ -29,7 +29,7 @@ def forward_patch(network: SwinUNETR, values: HostArray) -> Float32Array:
     if values.dtype != np.float32 or not np.isfinite(values).all():
         raise InvalidInputError("Network input must be finite float32")
     mx = network.mx
-    result = network(cast(ArrayFactory, mx.array)(values))
+    result = network(mx.array(values))
     mx.eval(result)
     mx.synchronize()
     host = cast(Float32Array, np.asarray(result))

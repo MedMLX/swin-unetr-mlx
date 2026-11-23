@@ -6,7 +6,7 @@ import platform
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX
+    from medmlx_core.typing import MlxRuntime
 
 from medmlx_core import runtime as core_runtime
 from medmlx_core.errors import MissingDependencyError
@@ -24,7 +24,7 @@ def _require_apple_silicon() -> None:
         )
 
 
-def require_metal(mx: MLX) -> None:
+def require_metal(mx: MlxRuntime) -> None:
     """Reject unavailable Metal or an execution device other than the Metal GPU."""
     _require_apple_silicon()
     if not mx.metal.is_available():
@@ -33,14 +33,14 @@ def require_metal(mx: MLX) -> None:
         raise MissingDependencyError("SwinUNETR requires the MLX Metal GPU device", hint=_HINT)
 
 
-def import_mlx() -> MLX:
+def import_mlx() -> MlxRuntime:
     """Load MLX through medmlx-core after admitting only the supported host."""
     _require_apple_silicon()
     try:
         core_runtime.import_mlx()
         import mlx.core as native_mx
 
-        mx = cast("MLX", native_mx)
+        mx = cast("MlxRuntime", native_mx)
     except MissingDependencyError as error:
         raise MissingDependencyError(str(error), hint=_HINT) from error
     require_metal(mx)

@@ -6,13 +6,14 @@ import os
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from swin_unetr_mlx._types import MLX, Array
+    from medmlx_core.typing import MlxRuntime
+
+    from swin_unetr_mlx._types import Array
 from pathlib import Path
 
 import numpy as np
 import pytest
-from medmlx_core.errors import InvalidInputError
-from medmlx_core.typing import ArrayFactory
+from medmlx_core.errors import AssetNotReadyError
 from reference_data import seeded_native_weights
 
 from swin_unetr_mlx import forward_patch, load_network
@@ -41,14 +42,14 @@ def test_converted_model_matches_independent_source(
 @pytest.fixture(scope="module")
 def converted_weights(
     tmp_path_factory: pytest.TempPathFactory,
-    mx: MLX,
+    mx: MlxRuntime,
 ) -> dict[str, Array]:
     """Create and validate a seeded native checkpoint for admission cases."""
     destination = tmp_path_factory.mktemp("converted") / "model.safetensors"
     arrays = seeded_native_weights(3)
     mx.save_safetensors(
         str(destination),
-        {name: cast(ArrayFactory, mx.array)(value) for name, value in arrays.items()},
+        {name: mx.array(value) for name, value in arrays.items()},
     )
     load_network(destination)
     return cast("dict[str, Array]", mx.load(str(destination)))
@@ -56,7 +57,7 @@ def converted_weights(
 
 @pytest.mark.parametrize("corruption", ["missing", "shape", "nonfinite", "index_range"])
 def test_converted_checkpoint_admission(
-    tmp_path: Path, converted_weights: dict[str, Array], corruption: str, mx: MLX
+    tmp_path: Path, converted_weights: dict[str, Array], corruption: str, mx: MlxRuntime
 ) -> None:
     """Reject missing, malformed, non-finite, or out-of-table checkpoint tensors."""
     weights = dict(converted_weights)
@@ -73,5 +74,5 @@ def test_converted_checkpoint_admission(
         weights[name] = mx.full(weights[name].shape, 13**3, dtype=mx.int32)
     destination = tmp_path / "invalid.safetensors"
     mx.save_safetensors(str(destination), weights)
-    with pytest.raises(InvalidInputError):
+    with pytest.raises(AssetNotReadyError):
         load_network(destination)
