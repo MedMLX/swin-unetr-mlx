@@ -6,7 +6,7 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 
 [![PyPI](https://img.shields.io/pypi/v/swin-unetr-mlx)](https://pypi.org/project/swin-unetr-mlx/)
 [![Python](https://img.shields.io/pypi/pyversions/swin-unetr-mlx)](https://pypi.org/project/swin-unetr-mlx/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.0/LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.1/LICENSE)
 [![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-MLX-black?logo=apple)](https://github.com/ml-explore/mlx)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97_Hugging_Face-weights-yellow)](https://huggingface.co/MedMLX/swin-unetr-mlx)
 [![MedMLX](https://img.shields.io/badge/MedMLX-runtime-A51C30)](https://github.com/MedMLX/medmlx)
@@ -28,7 +28,7 @@ Segment 13 abdominal organs in CT with MONAI SwinUNETR and native MLX.
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate
-uv pip install "swin-unetr-mlx>=0.4.0"
+uv pip install "swin-unetr-mlx>=0.4.1"
 ```
 
 ## Run
@@ -64,7 +64,7 @@ rejected when its qform and sform headers make ITK and NiBabel disagree on the a
 
 The mask is `out/mask.nii.gz`, with the input shape and the ITK reader's affine. It holds
 float32 label indices from the bundled
-[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.0/src/swin_unetr_mlx/specification.json):
+[BTCV label map](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.1/src/swin_unetr_mlx/specification.json):
 
 | Index | Name | Index | Name |
 | ---: | :--- | ---: | :--- |
@@ -124,4 +124,4 @@ For Codex, use `codex mcp add medmlx -- "$MEDMLX" serve --root "$HOME/medmlx-wor
 
 ## License
 
-[Apache-2.0](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.0/LICENSE). See [third-party notices](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.0/THIRD_PARTY_NOTICES.md). Model weights retain their publisher terms.
+[Apache-2.0](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.1/LICENSE). See [third-party notices](https://github.com/MedMLX/swin-unetr-mlx/blob/v0.4.1/THIRD_PARTY_NOTICES.md). Model weights retain their publisher terms.
